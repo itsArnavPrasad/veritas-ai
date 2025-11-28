@@ -191,12 +191,22 @@ class TweetStream:
             if cluster_key not in self.clusters:
                 # Create new cluster
                 cluster_id = f"{self.stream_id}_{len(self.clusters)}"
+                tweet_obj = {
+                    'text': tweet['text'],
+                    'username': tweet.get('username', 'unknown'),
+                    'tweet_id': tweet.get('tweet_id', ''),
+                    'timestamp': tweet.get('timestamp', ''),
+                    'likes': tweet.get('likes', 0),
+                    'retweets': tweet.get('retweets', 0),
+                    'replies': tweet.get('replies', 0)
+                }
                 self.clusters[cluster_key] = {
                     'cluster_id': cluster_id,
                     'centroid_lat': lat,
                     'centroid_lon': lon,
-                    'headline': tweet['text'][:200],  # First 200 chars
-                    'top_tweets': [tweet['text']],
+                    'headline': tweet['text'],  # Full text, not truncated
+                    'headline_username': tweet.get('username', 'unknown'),  # Store username for headline
+                    'top_tweets': [tweet_obj],
                     'popularity_score': popularity,
                     'last_seen': tweet['timestamp'],
                     'tweet_count': 1,
@@ -234,17 +244,30 @@ class TweetStream:
                 cluster['centroid_lat'] = new_base_lat + offset_lat_cluster
                 cluster['centroid_lon'] = new_base_lon + offset_lon_cluster
                 
-                # Add to top tweets (keep top 3)
-                cluster['top_tweets'].append(tweet['text'])
+                # Add tweet to list (store all tweets, not just top 3)
+                tweet_obj = {
+                    'text': tweet['text'],
+                    'username': tweet.get('username', 'unknown'),
+                    'tweet_id': tweet.get('tweet_id', ''),
+                    'timestamp': tweet.get('timestamp', ''),
+                    'likes': tweet.get('likes', 0),
+                    'retweets': tweet.get('retweets', 0),
+                    'replies': tweet.get('replies', 0)
+                }
+                cluster['top_tweets'].append(tweet_obj)
+                # Keep tweets sorted by popularity (likes + retweets + replies) for display
                 cluster['top_tweets'] = sorted(
                     cluster['top_tweets'],
-                    key=lambda t: len(t),
+                    key=lambda t: t.get('likes', 0) + 2 * t.get('retweets', 0) + 0.5 * t.get('replies', 0),
                     reverse=True
-                )[:3]
+                )
                 
-                # Update headline to most popular tweet
-                if popularity > cluster['popularity_score'] / cluster['tweet_count']:
-                    cluster['headline'] = tweet['text'][:200]
+                # Update headline to tweet with most likes (full text, not truncated)
+                # Find the tweet with the most likes
+                most_liked_tweet = max(cluster['top_tweets'], key=lambda t: t.get('likes', 0))
+                if most_liked_tweet.get('likes', 0) > 0:
+                    cluster['headline'] = most_liked_tweet['text']  # Full text
+                    cluster['headline_username'] = most_liked_tweet.get('username', 'unknown')
                 
                 print(f"   🔄 Updated EXISTING cluster: {cluster['cluster_id']}")
                 print(f"      Tweet count: {old_count} → {cluster['tweet_count']}")

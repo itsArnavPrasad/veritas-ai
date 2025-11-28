@@ -15,6 +15,16 @@ const MAPBOX_TOKEN = "pk.eyJ1IjoiYXRoMG0iLCJhIjoiY2szMDlnazFhMG5mMDNtbW1wc2o2OXJ
 // API base URL - adjust based on your backend
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+interface Tweet {
+    text: string;
+    username: string;
+    tweet_id?: string;
+    timestamp?: string;
+    likes?: number;
+    retweets?: number;
+    replies?: number;
+}
+
 interface TweetCluster {
     cluster_id: string;
     coordinates: [number, number];
@@ -23,7 +33,7 @@ interface TweetCluster {
     text: string; // Headline text
     popularity_score: number;
     last_seen: string;
-    top_tweets?: string[];
+    top_tweets?: Tweet[];
 }
 
 interface ClusterUpdate {
@@ -34,7 +44,7 @@ interface ClusterUpdate {
         centroid_lat: number;
         centroid_lon: number;
         headline: string;
-        top_tweets: string | string[];
+        top_tweets: string | string[] | Tweet[];
         popularity_score: number;
         last_seen: string;
         tweet_count: number;
@@ -120,16 +130,35 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
                     if (update.type === "cluster_update" && update.cluster) {
                         const cluster = update.cluster;
                         
-                        // Parse top_tweets if it's a string
-                        let topTweets: string[] = [];
+                        // Parse top_tweets - handle both old format (strings) and new format (objects)
+                        let topTweets: Tweet[] = [];
                         if (typeof cluster.top_tweets === "string") {
                             try {
-                                topTweets = JSON.parse(cluster.top_tweets);
+                                const parsed = JSON.parse(cluster.top_tweets);
+                                if (Array.isArray(parsed)) {
+                                    // Check if it's array of strings or objects
+                                    topTweets = parsed.map((item: any) => {
+                                        if (typeof item === "string") {
+                                            return { text: item, username: "unknown" };
+                                        } else {
+                                            return item as Tweet;
+                                        }
+                                    });
+                                } else {
+                                    topTweets = [{ text: parsed, username: "unknown" }];
+                                }
                             } catch {
-                                topTweets = [cluster.top_tweets];
+                                topTweets = [{ text: cluster.top_tweets, username: "unknown" }];
                             }
                         } else if (Array.isArray(cluster.top_tweets)) {
-                            topTweets = cluster.top_tweets;
+                            // Handle array of strings or objects
+                            topTweets = cluster.top_tweets.map((item: any) => {
+                                if (typeof item === "string") {
+                                    return { text: item, username: "unknown" };
+                                } else {
+                                    return item as Tweet;
+                                }
+                            });
                         }
                         
                         const tweetCluster: TweetCluster = {
@@ -347,44 +376,109 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
 
                     {/* Hover Tooltip */}
                     <AnimatePresence>
-                        {hoveredCluster && (
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.9, y: 10 }}
-                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                exit={{ opacity: 0, scale: 0.9, y: 10 }}
-                                className="absolute bottom-6 left-6 z-20 max-w-sm"
-                            >
-                                <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-xl shadow-2xl">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <h3 className="text-white font-bold text-lg">Cluster Detected</h3>
-                                        <span className="bg-alert-red/20 text-alert-red text-xs px-2 py-0.5 rounded-full border border-alert-red/30">
-                                            High Severity
-                                        </span>
-                                    </div>
-                                    <p className="text-text-secondary text-sm mb-3">
-                                        {hoveredCluster.count} tweets • Popularity: {hoveredCluster.popularity_score.toFixed(1)}
-                                    </p>
-                                    <div className="bg-white/5 p-3 rounded-lg mb-4 border border-white/5">
-                                        <p className="text-white italic text-sm">"{hoveredCluster.text}"</p>
-                                    </div>
+                        {hoveredCluster && (() => {
+                            // Find the tweet with the most likes
+                            const getMostLikedTweet = (): Tweet | null => {
+                                if (!hoveredCluster.top_tweets || hoveredCluster.top_tweets.length === 0) {
+                                    return null;
+                                }
+                                
+                                // Find tweet with maximum likes
+                                let mostLiked: Tweet | null = null;
+                                let maxLikes = -1;
+                                
+                                for (const tweet of hoveredCluster.top_tweets) {
+                                    const tweetObj = typeof tweet === 'string' 
+                                        ? { text: tweet, username: 'unknown', likes: 0 }
+                                        : tweet;
+                                    const likes = tweetObj.likes || 0;
+                                    
+                                    if (likes > maxLikes) {
+                                        maxLikes = likes;
+                                        mostLiked = tweetObj;
+                                    }
+                                }
+                                
+                                return mostLiked;
+                            };
+                            
+                            const mostLikedTweet = getMostLikedTweet();
+                            const headlineText = mostLikedTweet 
+                                ? mostLikedTweet.text 
+                                : hoveredCluster.text;
+                            const headlineUsername = mostLikedTweet 
+                                ? mostLikedTweet.username 
+                                : 'unknown';
+                            
+                            return (
+                                <motion.div
+                                    initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                                    className="absolute bottom-6 left-6 z-20 max-w-md w-96"
+                                >
+                                    <div className="bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-xl shadow-2xl max-h-[500px] flex flex-col">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <h3 className="text-white font-bold text-lg">Cluster Detected</h3>
+                                            <span className="bg-alert-red/20 text-alert-red text-xs px-2 py-0.5 rounded-full border border-alert-red/30">
+                                                High Severity
+                                            </span>
+                                        </div>
+                                        <p className="text-text-secondary text-sm mb-3">
+                                            {hoveredCluster.count} tweets • Popularity: {hoveredCluster.popularity_score.toFixed(1)}
+                                        </p>
+                                        <div className="bg-white/5 p-3 rounded-lg mb-4 border border-white/5">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <span className="text-ice-cyan text-xs font-semibold">
+                                                    @{headlineUsername}
+                                                </span>
+                                                {mostLikedTweet && (mostLikedTweet.likes || mostLikedTweet.retweets || mostLikedTweet.replies) && (
+                                                    <span className="text-text-secondary text-xs">
+                                                        {mostLikedTweet.likes || 0}❤️ • {mostLikedTweet.retweets || 0}🔄 • {mostLikedTweet.replies || 0}💬
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="text-white text-sm leading-relaxed break-words whitespace-pre-wrap">
+                                                {headlineText}
+                                            </p>
+                                        </div>
                                     {hoveredCluster.top_tweets && hoveredCluster.top_tweets.length > 0 && (
-                                        <div className="bg-white/5 p-2 rounded mb-3 border border-white/5">
-                                            <p className="text-text-secondary text-xs mb-1">Top Tweets:</p>
-                                            {hoveredCluster.top_tweets.slice(0, 2).map((tweet, idx) => (
-                                                <p key={idx} className="text-white text-xs mb-1">• {tweet.substring(0, 100)}...</p>
-                                            ))}
+                                        <div className="bg-white/5 p-2 rounded mb-3 border border-white/5 flex-1 min-h-0 flex flex-col">
+                                            <p className="text-text-secondary text-xs mb-2 font-semibold">
+                                                All Tweets ({hoveredCluster.top_tweets.length}):
+                                            </p>
+                                            <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar min-h-0">
+                                                {hoveredCluster.top_tweets.map((tweet, idx) => (
+                                                    <div key={idx} className="bg-black/30 p-2 rounded border border-white/5">
+                                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                            <span className="text-ice-cyan text-xs font-semibold">
+                                                                @{typeof tweet === 'string' ? 'unknown' : tweet.username}
+                                                            </span>
+                                                            {typeof tweet !== 'string' && (tweet.likes || tweet.retweets || tweet.replies) && (
+                                                                <span className="text-text-secondary text-xs">
+                                                                    {tweet.likes || 0}❤️ • {tweet.retweets || 0}🔄 • {tweet.replies || 0}💬
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-white text-xs leading-relaxed break-words">
+                                                            {typeof tweet === 'string' ? tweet : tweet.text}
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     )}
                                     <NeonButton
                                         variant="primary"
                                         className="w-full flex items-center justify-center gap-2"
-                                        onClick={() => onVerifyTweet(hoveredCluster.text)}
+                                        onClick={() => onVerifyTweet(headlineText)}
                                     >
                                         Verify Now <ArrowUp size={16} />
                                     </NeonButton>
                                 </div>
                             </motion.div>
-                        )}
+                            );
+                        })()}
                     </AnimatePresence>
                 </AntiGravityCard>
             </motion.div>
