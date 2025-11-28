@@ -6,8 +6,10 @@ import { NeonButton } from "../components/ui/NeonButton";
 import { Link, useLocation } from "react-router-dom";
 import {
     FileText, Search, Brain, Image as ImageIcon, ShieldCheck, CheckCircle,
-    Loader2, ArrowRight, Video
+    Loader2, ArrowRight, Video, Eye, AlertTriangle
 } from "lucide-react";
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 // Define the structure of the pipeline
 const pipelineConfig = {
@@ -25,17 +27,6 @@ const pipelineConfig = {
     ]
 };
 
-const logs = [
-    { time: "10:42:01", agent: "Orchestrator", message: "Initiating multimodal pipeline..." },
-    { time: "10:42:02", agent: "Preprocessor", message: "Inputs received: 1 Text, 1 Image." },
-    { time: "10:42:03", agent: "VisionAgent", message: "Analyzing image features..." },
-    { time: "10:42:03", agent: "TextAgent", message: "Extracting claims from text..." },
-    { time: "10:42:05", agent: "WebCrawler", message: "Retrieving sources for text claims..." },
-    { time: "10:42:08", agent: "ConsistencyCheck", message: "Cross-referencing image context with text claims..." },
-    { time: "10:42:10", agent: "FusionEngine", message: "Calculating final confidence score..." },
-    { time: "10:42:12", agent: "Orchestrator", message: "Analysis complete. Verdict ready." },
-];
-
 export const PipelineScreen: React.FC = () => {
     const location = useLocation();
     // Get inputs from state or sessionStorage fallback
@@ -49,15 +40,114 @@ export const PipelineScreen: React.FC = () => {
                 ];
             } catch {
                 return [
-                    { id: "1", type: "text", content: "Sample claim" },
-                    { id: "2", type: "image", content: "evidence.jpg" }
-                ];
+        { id: "1", type: "text", content: "Sample claim" },
+        { id: "2", type: "image", content: "evidence.jpg" }
+    ];
             }
         })();
 
     const [progress, setProgress] = useState(0);
     const [isComplete, setIsComplete] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+    
+    // State for image VLM analysis results
+    const [imageAnalysisResults, setImageAnalysisResults] = useState<Map<string, any>>(new Map());
+    const [analyzingImages, setAnalyzingImages] = useState<Set<string>>(new Set());
+    const [activityLogs, setActivityLogs] = useState<Array<{ time: string; agent: string; message: string }>>([
+        { time: "10:42:01", agent: "Orchestrator", message: "Initiating multimodal pipeline..." },
+    ]);
+
+    // Analyze images when component mounts
+    useEffect(() => {
+        const analyzeImages = async () => {
+            const imageInputs = inputs.filter((input: any) => input.type === "image" && input.file_id);
+            
+            if (imageInputs.length > 0) {
+                setActivityLogs((prev) => [
+                    ...prev,
+                    { 
+                        time: new Date().toLocaleTimeString(), 
+                        agent: "Preprocessor", 
+                        message: `Inputs received: ${inputs.filter((i: any) => i.type === "text").length} Text, ${imageInputs.length} Image(s).` 
+                    },
+                ]);
+            }
+            
+            for (const input of imageInputs) {
+                if (imageAnalysisResults.has(input.id) || analyzingImages.has(input.id)) {
+                    continue; // Already analyzed or analyzing
+                }
+                
+                setAnalyzingImages((prev) => new Set(prev).add(input.id));
+                setActivityLogs((prev) => [
+                    ...prev,
+                    { 
+                        time: new Date().toLocaleTimeString(), 
+                        agent: "VisionAgent", 
+                        message: `Analyzing image: ${input.content} with Gemini VLM...` 
+                    },
+                ]);
+                
+                try {
+                    const response = await fetch(`${API_BASE_URL}/api/v1/verify/image/by-file-id`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({ file_id: input.file_id }),
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        setImageAnalysisResults((prev) => {
+                            const newMap = new Map(prev);
+                            newMap.set(input.id, data);
+                            return newMap;
+                        });
+                        
+                        const artifactStatus = data.vlm_ai_artifact_analysis?.artifact_detected ? "Detected" : "None";
+                        setActivityLogs((prev) => [
+                            ...prev,
+                            { 
+                                time: new Date().toLocaleTimeString(), 
+                                agent: "VisionAgent", 
+                                message: `Image analysis complete. AI Artifacts: ${artifactStatus}` 
+                            },
+                        ]);
+                    } else {
+                        const errorText = await response.text();
+                        console.error(`Failed to analyze image ${input.id}:`, errorText);
+                        setActivityLogs((prev) => [
+                            ...prev,
+                            { 
+                                time: new Date().toLocaleTimeString(), 
+                                agent: "VisionAgent", 
+                                message: `Error analyzing image: ${errorText}` 
+                            },
+                        ]);
+                    }
+                } catch (error) {
+                    console.error(`Error analyzing image ${input.id}:`, error);
+                    setActivityLogs((prev) => [
+                        ...prev,
+                        { 
+                            time: new Date().toLocaleTimeString(), 
+                            agent: "VisionAgent", 
+                            message: `Error: ${error instanceof Error ? error.message : "Unknown error"}` 
+                        },
+                    ]);
+                } finally {
+                    setAnalyzingImages((prev) => {
+                        const newSet = new Set(prev);
+                        newSet.delete(input.id);
+                        return newSet;
+                    });
+                }
+            }
+        };
+        
+        analyzeImages();
+    }, [inputs]);
 
     // Simulate progress
     useEffect(() => {
@@ -206,6 +296,47 @@ export const PipelineScreen: React.FC = () => {
                                     </div>
                                     {/* Extraction Node */}
                                     <div className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: 400, top: lane.y }}>
+                                        {lane.id === "image" ? (() => {
+                                            const imageInput = inputs.find((i: any) => i.type === "image");
+                                            const analysis = imageInput ? imageAnalysisResults.get(imageInput.id) : null;
+                                            const isAnalyzing = imageInput ? analyzingImages.has(imageInput.id) : false;
+                                            
+                                            const details: any = {};
+                                            if (analysis?.vlm_description) {
+                                                if (analysis.vlm_description.objects) {
+                                                    details["Objects"] = analysis.vlm_description.objects.length;
+                                                }
+                                                if (analysis.vlm_description.visible_text) {
+                                                    details["Text Found"] = analysis.vlm_description.visible_text.length > 0 ? "Yes" : "No";
+                                                }
+                                            }
+                                            if (analysis?.vlm_ai_artifact_analysis) {
+                                                details["AI Artifacts"] = analysis.vlm_ai_artifact_analysis.artifact_detected ? "Detected" : "None";
+                                            }
+                                            
+                                            if (Object.keys(details).length === 0) {
+                                                details["Status"] = isAnalyzing ? "Analyzing..." : "Pending";
+                                            }
+                                            
+                                            return (
+                                                <PipelineNode
+                                                    icon={Search}
+                                                    label="VLM Analysis"
+                                                    details={details}
+                                                    status={
+                                                        isAnalyzing 
+                                                            ? "processing" 
+                                                            : analysis 
+                                                                ? "completed" 
+                                                                : progress > 20 && progress < 40 
+                                                                    ? "processing" 
+                                                                    : "idle"
+                                                    }
+                                                    isActive={activeStage === "extraction" || isAnalyzing}
+                                                    size="sm"
+                                                />
+                                            );
+                                        })() : (
                                         <PipelineNode
                                             icon={Search}
                                             label="Extract"
@@ -214,6 +345,7 @@ export const PipelineScreen: React.FC = () => {
                                             isActive={activeStage === "extraction"}
                                             size="sm"
                                         />
+                                        )}
                                     </div>
                                     {/* Retrieval Node */}
                                     <div className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: 600, top: lane.y }}>
@@ -256,25 +388,156 @@ export const PipelineScreen: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Right Panel: Agent Activity Log */}
-                <div className="w-80 border-l border-white/10 bg-black/40 backdrop-blur-xl flex flex-col z-20">
+                {/* Right Panel: Agent Activity Log & Image Analysis */}
+                <div className="w-96 border-l border-white/10 bg-black/40 backdrop-blur-xl flex flex-col z-20">
                     <div className="p-4 border-b border-white/10">
                         <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                             <Loader2 className={`text-ice-cyan ${!isComplete ? "animate-spin" : ""}`} size={16} />
-                            Agent Swarm Activity
+                            Analysis Results
                         </h3>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-white/10">
-                        {logs.map((log, i) => {
-                            // Show logs based on progress
-                            if ((i + 1) * 12 > progress) return null;
-
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-white/10">
+                        {/* Image VLM Analysis Results */}
+                        {inputs.filter((input: any) => input.type === "image").map((input: any) => {
+                            const analysis = imageAnalysisResults.get(input.id);
+                            const isAnalyzing = analyzingImages.has(input.id);
+                            
+                            return (
+                                <motion.div
+                                    key={input.id}
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="p-4 rounded-lg bg-white/5 border border-white/10"
+                                >
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <ImageIcon size={16} className="text-saffron-gold" />
+                                        <span className="text-sm font-semibold text-white">{input.content}</span>
+                                        {isAnalyzing && (
+                                            <Loader2 className="animate-spin text-ice-cyan ml-auto" size={14} />
+                                        )}
+                                    </div>
+                                    
+                                    {isAnalyzing && (
+                                        <p className="text-xs text-text-secondary">Analyzing with Gemini VLM...</p>
+                                    )}
+                                    
+                                    {analysis && (
+                                        <div className="space-y-3">
+                                            {/* VLM Description */}
+                                            {analysis.vlm_description && (
+                                                <div className="bg-black/30 p-3 rounded border border-white/5">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <Eye size={14} className="text-ice-cyan" />
+                                                        <span className="text-xs font-semibold text-ice-cyan">Image Description</span>
+                                                    </div>
+                                                    {analysis.vlm_description.error ? (
+                                                        <p className="text-xs text-alert-red">{analysis.vlm_description.error}</p>
+                                                    ) : (
+                                                        <div className="space-y-2 text-xs">
+                                                            <p className="text-white/90">{analysis.vlm_description.description || "No description available"}</p>
+                                                            {analysis.vlm_description.objects && analysis.vlm_description.objects.length > 0 && (
+                                                                <div>
+                                                                    <span className="text-text-secondary">Objects: </span>
+                                                                    <span className="text-white">{analysis.vlm_description.objects.join(", ")}</span>
+                                                                </div>
+                                                            )}
+                                                            {analysis.vlm_description.visible_text && analysis.vlm_description.visible_text.length > 0 && (
+                                                                <div>
+                                                                    <span className="text-text-secondary">Text: </span>
+                                                                    <span className="text-white">{analysis.vlm_description.visible_text.join(", ")}</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            
+                                            {/* AI Artifact Detection */}
+                                            {analysis.vlm_ai_artifact_analysis && (
+                                                <div className={`p-3 rounded border ${
+                                                    analysis.vlm_ai_artifact_analysis.artifact_detected 
+                                                        ? "bg-alert-red/10 border-alert-red/30" 
+                                                        : "bg-black/30 border-white/5"
+                                                }`}>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <AlertTriangle 
+                                                            size={14} 
+                                                            className={analysis.vlm_ai_artifact_analysis.artifact_detected ? "text-alert-red" : "text-ice-cyan"} 
+                                                        />
+                                                        <span className={`text-xs font-semibold ${
+                                                            analysis.vlm_ai_artifact_analysis.artifact_detected ? "text-alert-red" : "text-ice-cyan"
+                                                        }`}>
+                                                            AI Artifact Detection
+                                                        </span>
+                                                    </div>
+                                                    {analysis.vlm_ai_artifact_analysis.error ? (
+                                                        <p className="text-xs text-alert-red">{analysis.vlm_ai_artifact_analysis.error}</p>
+                                                    ) : (
+                                                        <div className="space-y-1 text-xs">
+                                                            <div className="flex items-center justify-between">
+                                                                <span className="text-text-secondary">Detected:</span>
+                                                                <span className={`font-semibold ${
+                                                                    analysis.vlm_ai_artifact_analysis.artifact_detected ? "text-alert-red" : "text-ice-cyan"
+                                                                }`}>
+                                                                    {analysis.vlm_ai_artifact_analysis.artifact_detected ? "Yes" : "No"}
+                                                                </span>
+                                                            </div>
+                                                            {analysis.vlm_ai_artifact_analysis.confidence !== undefined && (
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="text-text-secondary">Confidence:</span>
+                                                                    <span className="text-white">
+                                                                        {(analysis.vlm_ai_artifact_analysis.confidence * 100).toFixed(1)}%
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                            {analysis.vlm_ai_artifact_analysis.artifacts && analysis.vlm_ai_artifact_analysis.artifacts.length > 0 && (
+                                                                <div>
+                                                                    <span className="text-text-secondary">Issues: </span>
+                                                                    <span className="text-alert-red">
+                                                                        {analysis.vlm_ai_artifact_analysis.artifacts.join(", ")}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                            {analysis.vlm_ai_artifact_analysis.explanation && 
+                                                             !analysis.vlm_ai_artifact_analysis.explanation.toLowerCase().includes("failed") &&
+                                                             !analysis.vlm_ai_artifact_analysis.explanation.toLowerCase().includes("error") &&
+                                                             !analysis.vlm_ai_artifact_analysis.explanation.toLowerCase().includes("could not parse") && (
+                                                                <p className="text-white/80 mt-2">
+                                                                    {analysis.vlm_ai_artifact_analysis.explanation}
+                                                                </p>
+                                                            )}
+                                                            {analysis.vlm_ai_artifact_analysis.explanation && 
+                                                             (analysis.vlm_ai_artifact_analysis.explanation.toLowerCase().includes("failed") ||
+                                                              analysis.vlm_ai_artifact_analysis.explanation.toLowerCase().includes("error") ||
+                                                              analysis.vlm_ai_artifact_analysis.explanation.toLowerCase().includes("could not parse")) && (
+                                                                <p className="text-text-secondary text-xs mt-2 italic">
+                                                                    Analysis completed, but some details could not be extracted.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </motion.div>
+                            );
+                        })}
+                        
+                        {/* Activity Log */}
+                        <div className="pt-4 border-t border-white/10 mt-4">
+                            <h4 className="text-xs font-semibold text-white mb-3 flex items-center gap-2">
+                                <Loader2 className={`text-ice-cyan ${!isComplete ? "animate-spin" : ""}`} size={12} />
+                                Agent Activity
+                            </h4>
+                            <div className="space-y-2">
+                                {activityLogs.map((log, i) => {
                             return (
                                 <motion.div
                                     key={i}
                                     initial={{ opacity: 0, x: 20 }}
                                     animate={{ opacity: 1, x: 0 }}
-                                    className="p-3 rounded bg-white/5 border border-white/5 text-xs"
+                                            className="p-2 rounded bg-white/5 border border-white/5 text-xs"
                                 >
                                     <div className="flex justify-between text-text-secondary mb-1">
                                         <span className="text-ice-cyan font-mono">{log.agent}</span>
@@ -284,6 +547,8 @@ export const PipelineScreen: React.FC = () => {
                                 </motion.div>
                             );
                         })}
+                            </div>
+                        </div>
                     </div>
 
                     <AnimatePresence>
