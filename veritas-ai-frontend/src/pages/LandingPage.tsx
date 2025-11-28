@@ -4,25 +4,32 @@ import { Layout } from "../components/layout/Layout";
 import { AntiGravityCard } from "../components/ui/AntiGravityCard";
 import { GlassInput } from "../components/ui/GlassInput";
 import { NeonButton } from "../components/ui/NeonButton";
-import { Link as RouterLink } from "react-router-dom";
-import { Link as LinkIcon, FileText, Image as ImageIcon, Video, Plus, X, ArrowRight, Upload, Clock } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { FileText, Image as ImageIcon, Video, Plus, X, ArrowRight, Upload, Clock } from "lucide-react";
 import { cn } from "../lib/utils";
 import { HistoryPanel } from "../components/ui/HistoryPanel";
 import { TwitterMapSection } from "../components/ui/TwitterMapSection";
 
-type InputType = "url" | "text" | "image" | "video";
+type InputType = "text" | "image" | "video";
 
 interface InputItem {
     id: string;
     type: InputType;
-    content: string; // URL, text content, or filename
+    content: string; // Text content or filename
     file?: File;
+    file_id?: string; // File ID returned from upload API
+    file_path?: string; // File path returned from upload API
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 export const LandingPage: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<InputType>("url");
+    const navigate = useNavigate();
+    const [activeTab, setActiveTab] = useState<InputType>("text");
     const [inputs, setInputs] = useState<InputItem[]>([]);
     const [inputValue, setInputValue] = useState("");
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState<string>("");
 
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
@@ -62,6 +69,73 @@ export const LandingPage: React.FC = () => {
         window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
+    const uploadFile = async (file: File, type: "image" | "video"): Promise<{ file_id: string; file_path: string }> => {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const endpoint = type === "image" 
+            ? `${API_BASE_URL}/api/v1/upload/image`
+            : `${API_BASE_URL}/api/v1/upload/video`;
+
+        const response = await fetch(endpoint, {
+            method: "POST",
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({ detail: "Upload failed" }));
+            throw new Error(error.detail || "Failed to upload file");
+        }
+
+        const data = await response.json();
+        return {
+            file_id: data.file_id,
+            file_path: data.file_path,
+        };
+    };
+
+    const handleAnalyzeAll = async () => {
+        if (inputs.length === 0) return;
+
+        setIsUploading(true);
+        setUploadProgress("Uploading files...");
+
+        try {
+            // Upload all image and video files first
+            const updatedInputs = await Promise.all(
+                inputs.map(async (input) => {
+                    // If it's a file input and hasn't been uploaded yet
+                    if ((input.type === "image" || input.type === "video") && input.file && !input.file_id) {
+                        setUploadProgress(`Uploading ${input.content}...`);
+                        const uploadResult = await uploadFile(input.file!, input.type);
+                        return {
+                            ...input,
+                            file_id: uploadResult.file_id,
+                            file_path: uploadResult.file_path,
+                        };
+                    }
+                    return input;
+                })
+            );
+
+            setInputs(updatedInputs);
+            setUploadProgress("Files uploaded successfully!");
+
+            // Navigate to pipeline with updated inputs after a brief delay
+            setTimeout(() => {
+                // Store inputs in sessionStorage as fallback
+                sessionStorage.setItem("pipelineInputs", JSON.stringify(updatedInputs));
+                // Navigate with state
+                navigate("/pipeline", { state: { inputs: updatedInputs } });
+            }, 500);
+        } catch (error) {
+            console.error("Error uploading files:", error);
+            setUploadProgress(`Error: ${error instanceof Error ? error.message : "Upload failed"}`);
+            setIsUploading(false);
+            alert(`Failed to upload files: ${error instanceof Error ? error.message : "Unknown error"}`);
+        }
+    };
+
     return (
         <Layout className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)]">
             {/* History Button */}
@@ -99,7 +173,7 @@ export const LandingPage: React.FC = () => {
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-xl font-semibold text-white">Input Hub</h2>
                             <div className="flex gap-2 bg-black/40 p-1 rounded-lg border border-white/10">
-                                {(["url", "text", "image", "video"] as InputType[]).map((type) => (
+                                {(["text", "image", "video"] as InputType[]).map((type) => (
                                     <button
                                         key={type}
                                         onClick={() => setActiveTab(type)}
@@ -110,7 +184,6 @@ export const LandingPage: React.FC = () => {
                                                 : "text-text-secondary hover:text-white hover:bg-white/5"
                                         )}
                                     >
-                                        {type === "url" && <LinkIcon size={18} />}
                                         {type === "text" && <FileText size={18} />}
                                         {type === "image" && <ImageIcon size={18} />}
                                         {type === "video" && <Video size={18} />}
@@ -129,17 +202,6 @@ export const LandingPage: React.FC = () => {
                                     transition={{ duration: 0.2 }}
                                     className="min-h-[120px]"
                                 >
-                                    {activeTab === "url" && (
-                                        <div className="space-y-4">
-                                            <p className="text-sm text-text-secondary">Paste the URL of the article or source you want to verify.</p>
-                                            <GlassInput
-                                                placeholder="https://example.com/article..."
-                                                value={inputValue}
-                                                onChange={(e) => setInputValue(e.target.value)}
-                                                onKeyDown={(e) => e.key === "Enter" && addInput()}
-                                            />
-                                        </div>
-                                    )}
                                     {activeTab === "text" && (
                                         <div className="space-y-4">
                                             <p className="text-sm text-text-secondary">Enter the claim or text snippet to analyze.</p>
@@ -167,8 +229,8 @@ export const LandingPage: React.FC = () => {
                                 </motion.div>
                             </AnimatePresence>
 
-                            {/* Add Button for Text/URL */}
-                            {(activeTab === "url" || activeTab === "text") && (
+                            {/* Add Button for Text */}
+                            {activeTab === "text" && (
                                 <div className="flex justify-end">
                                     <NeonButton variant="secondary" onClick={addInput} className="flex items-center gap-2">
                                         <Plus size={16} /> Add to Analysis
@@ -210,12 +272,10 @@ export const LandingPage: React.FC = () => {
                                         <div className="flex items-start gap-3">
                                             <div className={cn(
                                                 "p-2 rounded-md",
-                                                item.type === "url" && "bg-royal-blue/10 text-royal-blue",
                                                 item.type === "text" && "bg-ice-cyan/10 text-ice-cyan",
                                                 item.type === "image" && "bg-saffron-gold/10 text-saffron-gold",
                                                 item.type === "video" && "bg-alert-red/10 text-alert-red",
                                             )}>
-                                                {item.type === "url" && <LinkIcon size={16} />}
                                                 {item.type === "text" && <FileText size={16} />}
                                                 {item.type === "image" && <ImageIcon size={16} />}
                                                 {item.type === "video" && <Video size={16} />}
@@ -237,15 +297,28 @@ export const LandingPage: React.FC = () => {
                         </div>
 
                         <div className="mt-6 pt-4 border-t border-white/10">
-                            <RouterLink to="/pipeline" state={{ inputs }}>
-                                <NeonButton
-                                    variant="primary"
-                                    className="w-full flex items-center justify-center gap-2"
-                                    disabled={inputs.length === 0}
-                                >
-                                    Analyze All <ArrowRight size={16} />
-                                </NeonButton>
-                            </RouterLink>
+                            {isUploading && (
+                                <div className="mb-3 text-center">
+                                    <p className="text-xs text-ice-cyan">{uploadProgress}</p>
+                                </div>
+                            )}
+                            <NeonButton
+                                variant="primary"
+                                className="w-full flex items-center justify-center gap-2"
+                                disabled={inputs.length === 0 || isUploading}
+                                onClick={handleAnalyzeAll}
+                            >
+                                {isUploading ? (
+                                    <>
+                                        <div className="w-4 h-4 border-2 border-ice-cyan border-t-transparent rounded-full animate-spin" />
+                                        Uploading...
+                                    </>
+                                ) : (
+                                    <>
+                                        Analyze All <ArrowRight size={16} />
+                                    </>
+                                )}
+                            </NeonButton>
                         </div>
                     </AntiGravityCard>
                 </div>

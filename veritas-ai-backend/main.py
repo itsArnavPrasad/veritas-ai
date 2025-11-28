@@ -16,7 +16,7 @@ load_dotenv(dotenv_path=env_path)
 
 from config import API_PREFIX
 from services.database import init_db
-from routers import verify, results, stream
+from routers import verify, results, stream, upload
 
 
 @asynccontextmanager
@@ -47,6 +47,7 @@ app.add_middleware(
 app.include_router(verify.router, prefix=API_PREFIX, tags=["verification"])
 app.include_router(results.router, prefix=API_PREFIX, tags=["results"])
 app.include_router(stream.router, prefix=API_PREFIX, tags=["streaming"])
+app.include_router(upload.router, prefix=API_PREFIX, tags=["upload"])
 
 
 @app.get("/")

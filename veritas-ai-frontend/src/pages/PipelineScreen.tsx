@@ -6,16 +6,15 @@ import { NeonButton } from "../components/ui/NeonButton";
 import { Link, useLocation } from "react-router-dom";
 import {
     FileText, Search, Brain, Image as ImageIcon, ShieldCheck, CheckCircle,
-    Loader2, ArrowRight, Video, Link as LinkIcon
+    Loader2, ArrowRight, Video
 } from "lucide-react";
 
 // Define the structure of the pipeline
 const pipelineConfig = {
     lanes: [
-        { id: "url", label: "URL Analysis", icon: LinkIcon, color: "blue", y: 100 },
-        { id: "text", label: "Text Claims", icon: FileText, color: "cyan", y: 200 },
-        { id: "image", label: "Visual Forensics", icon: ImageIcon, color: "gold", y: 300 },
-        { id: "video", label: "Video Analysis", icon: Video, color: "red", y: 400 },
+        { id: "text", label: "Text Claims", icon: FileText, color: "cyan", y: 150 },
+        { id: "image", label: "Visual Forensics", icon: ImageIcon, color: "gold", y: 250 },
+        { id: "video", label: "Video Analysis", icon: Video, color: "red", y: 350 },
     ],
     stages: [
         { id: "preprocessing", label: "Preprocessing", x: 200 },
@@ -39,10 +38,22 @@ const logs = [
 
 export const PipelineScreen: React.FC = () => {
     const location = useLocation();
-    const inputs = location.state?.inputs || [
-        { id: "1", type: "text", content: "Sample claim" },
-        { id: "2", type: "image", content: "evidence.jpg" }
-    ];
+    // Get inputs from state or sessionStorage fallback
+    const inputs = location.state?.inputs || 
+        (() => {
+            try {
+                const stored = sessionStorage.getItem("pipelineInputs");
+                return stored ? JSON.parse(stored) : [
+                    { id: "1", type: "text", content: "Sample claim" },
+                    { id: "2", type: "image", content: "evidence.jpg" }
+                ];
+            } catch {
+                return [
+                    { id: "1", type: "text", content: "Sample claim" },
+                    { id: "2", type: "image", content: "evidence.jpg" }
+                ];
+            }
+        })();
 
     const [progress, setProgress] = useState(0);
     const [isComplete, setIsComplete] = useState(false);
