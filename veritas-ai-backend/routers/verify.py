@@ -27,6 +27,13 @@ class ArticleVerificationRequest(BaseModel):
     html_content: Optional[str] = None
 
 
+class TweetVerificationRequest(BaseModel):
+    """Tweet verification request"""
+    tweet_text: str
+    tweet_url: Optional[str] = None
+    media_urls: Optional[list[str]] = []
+
+
 @router.post("/verify/text")
 async def verify_text(
     request: TextVerificationRequest,
@@ -189,4 +196,47 @@ async def verify_article(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing article: {str(e)}")
+
+
+@router.post("/verify/tweet")
+async def verify_tweet(
+    request: TweetVerificationRequest,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db)
+):
+    """
+    Verify a tweet (text and optional media)
+    """
+    try:
+        # Create verification record
+        verification = Verification(
+            id=uuid.uuid4(),
+            input_type=InputType.TEXT,  # Treat tweets as text for now
+            status=VerificationStatus.PENDING
+        )
+        db.add(verification)
+        db.commit()
+        db.refresh(verification)
+        
+        # Create storage directory
+        create_verification_storage(verification.id)
+        
+        # Save tweet text
+        tweet_content = f"Tweet Text: {request.tweet_text}\n"
+        if request.tweet_url:
+            tweet_content += f"Tweet URL: {request.tweet_url}\n"
+        if request.media_urls:
+            tweet_content += f"Media URLs: {', '.join(request.media_urls)}\n"
+        
+        await save_text_input(verification.id, tweet_content)
+        
+        # Trigger pipeline in background
+        background_tasks.add_task(run_pipeline, verification.id, InputType.TEXT)
+        
+        return JSONResponse(
+            status_code=202,
+            content={"verification_id": str(verification.id)}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing tweet: {str(e)}")
 

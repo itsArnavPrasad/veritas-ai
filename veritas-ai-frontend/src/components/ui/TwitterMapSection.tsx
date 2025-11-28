@@ -1,10 +1,10 @@
-import React, { useState } from "react";
-import Map, { NavigationControl, useControl } from "react-map-gl";
+import React, { useState, useEffect, useRef } from "react";
+import MapGL, { NavigationControl, useControl } from "react-map-gl";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import { NeonButton } from "./NeonButton";
 import { GlassInput } from "./GlassInput";
-import { Search, Twitter, ArrowUp } from "lucide-react";
+import { Search, Twitter, ArrowUp, Loader2 } from "lucide-react";
 import { AntiGravityCard } from "./AntiGravityCard";
 import { motion, AnimatePresence } from "framer-motion";
 import "mapbox-gl/dist/mapbox-gl.css";
@@ -12,25 +12,34 @@ import "mapbox-gl/dist/mapbox-gl.css";
 // Token from Twitter_example
 const MAPBOX_TOKEN = "pk.eyJ1IjoiYXRoMG0iLCJhIjoiY2szMDlnazFhMG5mMDNtbW1wc2o2OXJxaiJ9.gl8rnf3bAnnFOQdophEAeQ";
 
+// API base URL - adjust based on your backend
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 interface TweetCluster {
-    id: string;
+    cluster_id: string;
     coordinates: [number, number];
     count: number;
     sentiment: "positive" | "neutral" | "negative";
-    text: string; // Sample tweet text
+    text: string; // Headline text
+    popularity_score: number;
+    last_seen: string;
+    top_tweets?: string[];
 }
 
-// Mock data generator for "bomb blast" query
-const generateMockClusters = (query: string): TweetCluster[] => {
-    if (query.toLowerCase().includes("bomb") || query.toLowerCase().includes("blast")) {
-        return [
-            { id: "c1", coordinates: [72.8777, 19.0760], count: 25, sentiment: "negative", text: "Breaking: Reports of a blast in Juhu area. Stay safe Mumbai! #MumbaiBlast" }, // Mumbai
-            { id: "c2", coordinates: [72.83, 19.15], count: 12, sentiment: "negative", text: "Hearing loud noises near Andheri. What is happening? #Mumbai" },
-            { id: "c3", coordinates: [72.90, 19.05], count: 8, sentiment: "neutral", text: "Traffic diverted due to incident in Juhu. Avoid the route." },
-        ];
-    }
-    return [];
-};
+interface ClusterUpdate {
+    type: string;
+    stream_id?: string;
+    cluster?: {
+        cluster_id: string;
+        centroid_lat: number;
+        centroid_lon: number;
+        headline: string;
+        top_tweets: string | string[];
+        popularity_score: number;
+        last_seen: string;
+        tweet_count: number;
+    };
+}
 
 function DeckGLOverlay(props: any) {
     const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay({
@@ -47,25 +56,126 @@ interface TwitterMapSectionProps {
 
 export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTweet }) => {
     const [query, setQuery] = useState("");
-    const [clusters, setClusters] = useState<TweetCluster[]>([]);
+    const [clusters, setClusters] = useState<Map<string, TweetCluster>>(new Map());
     const [hoveredCluster, setHoveredCluster] = useState<TweetCluster | null>(null);
+    const [streamId, setStreamId] = useState<string | null>(null);
+    const [isStreaming, setIsStreaming] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const eventSourceRef = useRef<EventSource | null>(null);
     const [viewState, setViewState] = useState({
         longitude: 78.9629,
         latitude: 20.5937,
         zoom: 3.5
     });
 
-    const handleSearch = () => {
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+            }
+        };
+    }, []);
+
+    const handleSearch = async () => {
         if (!query.trim()) return;
-        const results = generateMockClusters(query);
-        setClusters(results);
-        if (results.length > 0) {
-            // Fly to the first cluster (Mumbai)
-            setViewState({
-                longitude: 72.8777,
-                latitude: 19.0760,
-                zoom: 10
+        
+        // Stop existing stream
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
+        
+        setIsLoading(true);
+        setClusters(new Map());
+        
+        try {
+            // Start new stream
+            const response = await fetch(`${API_BASE_URL}/api/v1/start_stream`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ query: query.trim() }),
             });
+            
+            if (!response.ok) {
+                throw new Error("Failed to start stream");
+            }
+            
+            const data = await response.json();
+            const newStreamId = data.stream_id;
+            setStreamId(newStreamId);
+            setIsStreaming(true);
+            setIsLoading(false);
+            
+            // Connect to SSE stream
+            const eventSource = new EventSource(`${API_BASE_URL}/api/v1/stream/${newStreamId}`);
+            eventSourceRef.current = eventSource;
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const update: ClusterUpdate = JSON.parse(event.data);
+                    
+                    if (update.type === "cluster_update" && update.cluster) {
+                        const cluster = update.cluster;
+                        
+                        // Parse top_tweets if it's a string
+                        let topTweets: string[] = [];
+                        if (typeof cluster.top_tweets === "string") {
+                            try {
+                                topTweets = JSON.parse(cluster.top_tweets);
+                            } catch {
+                                topTweets = [cluster.top_tweets];
+                            }
+                        } else if (Array.isArray(cluster.top_tweets)) {
+                            topTweets = cluster.top_tweets;
+                        }
+                        
+                        const tweetCluster: TweetCluster = {
+                            cluster_id: cluster.cluster_id,
+                            coordinates: [cluster.centroid_lon, cluster.centroid_lat],
+                            count: cluster.tweet_count,
+                            sentiment: "negative", // Default for now
+                            text: cluster.headline,
+                            popularity_score: cluster.popularity_score,
+                            last_seen: cluster.last_seen,
+                            top_tweets: topTweets,
+                        };
+                        
+                        // Update clusters map
+                        setClusters((prev) => {
+                            const newMap = new Map(prev);
+                            const isFirstCluster = prev.size === 0;
+                            newMap.set(cluster.cluster_id, tweetCluster);
+                            
+                            // Fly to first cluster
+                            if (isFirstCluster) {
+                                setViewState({
+                                    longitude: cluster.centroid_lon,
+                                    latitude: cluster.centroid_lat,
+                                    zoom: 10
+                                });
+                            }
+                            
+                            return newMap;
+                        });
+                    }
+                } catch (error) {
+                    console.error("Error parsing SSE message:", error);
+                }
+            };
+            
+            eventSource.onerror = (error) => {
+                console.error("SSE error:", error);
+                setIsStreaming(false);
+                eventSource.close();
+            };
+            
+        } catch (error) {
+            console.error("Error starting stream:", error);
+            setIsLoading(false);
+            setIsStreaming(false);
         }
     };
 
@@ -78,13 +188,73 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
         };
     }, []);
 
+    // Function to generate consistent, vibrant, and easily distinguishable colors from cluster_id
+    const getClusterColor = (clusterId: string): [number, number, number] => {
+        // Create a strong hash from cluster_id for consistency
+        let hash = 0;
+        for (let i = 0; i < clusterId.length; i++) {
+            const char = clusterId.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        
+        // Use hash to generate distinct colors
+        // Strategy: Use golden ratio spacing for hue to maximize color separation
+        const goldenRatio = 0.618033988749895;
+        const hue = (Math.abs(hash) * goldenRatio) % 360;
+        
+        // High saturation (80-100%) for vibrant, distinct colors
+        const saturation = 80 + (Math.abs(hash >> 8) % 20); // 80-100%
+        
+        // Medium-high lightness (55-75%) for visibility on dark map
+        const lightness = 55 + (Math.abs(hash >> 16) % 20); // 55-75%
+        
+        // Convert HSL to RGB
+        const h = hue / 360;
+        const s = saturation / 100;
+        const l = lightness / 100;
+        
+        const hue2rgb = (p: number, q: number, t: number): number => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1 / 6) return p + (q - p) * 6 * t;
+            if (t < 1 / 2) return q;
+            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+            return p;
+        };
+        
+        let r, g, b;
+        
+        if (s === 0) {
+            // Achromatic (grayscale)
+            r = g = b = l;
+        } else {
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+            r = hue2rgb(p, q, h + 1 / 3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1 / 3);
+        }
+        
+        return [
+            Math.round(r * 255),
+            Math.round(g * 255),
+            Math.round(b * 255)
+        ];
+    };
+    
+    const clusterArray = Array.from(clusters.values());
+    
     const layers = [
         new ScatterplotLayer({
             id: "tweet-clusters",
-            data: clusters,
+            data: clusterArray,
             getPosition: (d: TweetCluster) => d.coordinates,
-            getRadius: (d: TweetCluster) => 100 + (d.count * 20),
-            getFillColor: (d: TweetCluster) => d.sentiment === "negative" ? [248, 81, 73] : [74, 222, 128], // Red or Green
+            getRadius: (d: TweetCluster) => Math.min(100 + (d.count * 20), 500),
+            getFillColor: (d: TweetCluster) => {
+                // Use randomized but consistent color based on cluster_id
+                return getClusterColor(d.cluster_id);
+            },
             pickable: true,
             opacity: 0.8,
             stroked: true,
@@ -135,21 +305,45 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
                             onChange={(e) => setQuery(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                             icon={<Search size={18} />}
+                            disabled={isLoading || isStreaming}
                         />
-                        <NeonButton onClick={handleSearch}>Search</NeonButton>
+                        <NeonButton 
+                            onClick={handleSearch}
+                            disabled={isLoading || isStreaming}
+                        >
+                            {isLoading ? (
+                                <>
+                                    <Loader2 className="animate-spin" size={16} />
+                                    Starting...
+                                </>
+                            ) : isStreaming ? (
+                                <>
+                                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse mr-2" />
+                                    Streaming
+                                </>
+                            ) : (
+                                "Search"
+                            )}
+                        </NeonButton>
                     </div>
                 </div>
 
                 <AntiGravityCard className="h-[600px] relative overflow-hidden p-0 border-0" glowColor="cyan">
-                    <Map
-                        {...viewState}
-                        onMove={(evt: { viewState: any }) => setViewState(evt.viewState)}
-                        mapStyle="mapbox://styles/mapbox/dark-v11"
-                        mapboxAccessToken={MAPBOX_TOKEN}
-                    >
-                        <DeckGLOverlay layers={layers} />
-                        <NavigationControl position="top-right" />
-                    </Map>
+                    {MAPBOX_TOKEN ? (
+                        <MapGL
+                            {...viewState}
+                            onMove={(evt: { viewState: any }) => setViewState(evt.viewState)}
+                            mapStyle="mapbox://styles/mapbox/dark-v11"
+                            mapboxAccessToken={MAPBOX_TOKEN}
+                        >
+                            <DeckGLOverlay layers={layers} />
+                            <NavigationControl position="top-right" />
+                        </MapGL>
+                    ) : (
+                        <div className="w-full h-full flex items-center justify-center text-text-secondary">
+                            <p>Mapbox token not configured</p>
+                        </div>
+                    )}
 
                     {/* Hover Tooltip */}
                     <AnimatePresence>
@@ -168,17 +362,25 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
                                         </span>
                                     </div>
                                     <p className="text-text-secondary text-sm mb-3">
-                                        {hoveredCluster.count} tweets related to incident in this area.
+                                        {hoveredCluster.count} tweets • Popularity: {hoveredCluster.popularity_score.toFixed(1)}
                                     </p>
                                     <div className="bg-white/5 p-3 rounded-lg mb-4 border border-white/5">
                                         <p className="text-white italic text-sm">"{hoveredCluster.text}"</p>
                                     </div>
+                                    {hoveredCluster.top_tweets && hoveredCluster.top_tweets.length > 0 && (
+                                        <div className="bg-white/5 p-2 rounded mb-3 border border-white/5">
+                                            <p className="text-text-secondary text-xs mb-1">Top Tweets:</p>
+                                            {hoveredCluster.top_tweets.slice(0, 2).map((tweet, idx) => (
+                                                <p key={idx} className="text-white text-xs mb-1">• {tweet.substring(0, 100)}...</p>
+                                            ))}
+                                        </div>
+                                    )}
                                     <NeonButton
                                         variant="primary"
                                         className="w-full flex items-center justify-center gap-2"
                                         onClick={() => onVerifyTweet(hoveredCluster.text)}
                                     >
-                                        Verify This Cluster <ArrowUp size={16} />
+                                        Verify Now <ArrowUp size={16} />
                                     </NeonButton>
                                 </div>
                             </motion.div>

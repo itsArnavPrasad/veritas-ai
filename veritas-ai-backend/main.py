@@ -1,9 +1,18 @@
 """
 Veritas AI Backend - Main FastAPI Application
 """
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+
+# Load environment variables from .env file
+# Get the backend directory (where this file is located)
+backend_dir = Path(__file__).parent
+env_path = backend_dir / ".env"
+load_dotenv(dotenv_path=env_path)
 
 from config import API_PREFIX
 from services.database import init_db
