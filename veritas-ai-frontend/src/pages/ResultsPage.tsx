@@ -52,6 +52,8 @@ export const ResultsPage: React.FC = () => {
                 }
                 
                 const data = await response.json();
+                console.log("Results data:", data);
+                console.log("Input files:", data.input_files);
                 setResults(data);
             } catch (err) {
                 setError(err instanceof Error ? err.message : "Failed to load results");
@@ -108,6 +110,11 @@ export const ResultsPage: React.FC = () => {
     const textAnalysis = results.text_analysis || results.all_outputs?.text_analysis;
     const imageAnalysis = results.image_analysis || results.all_outputs?.image_analysis;
     const videoAnalysis = results.video_analysis || results.all_outputs?.video_analysis;
+    const inputFiles = results.input_files || [];
+    
+    // Get image and video files
+    const imageFile = inputFiles.find((f: any) => f.type === "image");
+    const videoFile = inputFiles.find((f: any) => f.type === "video");
 
     // Extract individual claim findings from text analysis
     const extractIndividualClaimFindings = (textAnalysis: any): any[] => {
@@ -460,6 +467,31 @@ export const ResultsPage: React.FC = () => {
                                     animate={{ height: "auto", opacity: 1 }}
                                     className="mt-6 pt-6 border-t border-white/10 space-y-4"
                                 >
+                                    {/* Display Image */}
+                                    {imageFile ? (
+                                        <div className="mb-4">
+                                            <h4 className="text-sm font-semibold text-white mb-2">Image</h4>
+                                            <div className="relative rounded-lg overflow-hidden border border-white/10 bg-black/20">
+                                                <img 
+                                                    src={`${API_BASE_URL}${imageFile.path}`}
+                                                    alt="Analyzed image"
+                                                    className="w-full h-auto max-h-96 object-contain"
+                                                    onError={(e) => {
+                                                        console.error("Image load error:", `${API_BASE_URL}${imageFile.path}`);
+                                                        console.error("Image file:", imageFile);
+                                                        console.error("API_BASE_URL:", API_BASE_URL);
+                                                    }}
+                                                    onLoad={() => {
+                                                        console.log("Image loaded successfully:", `${API_BASE_URL}${imageFile.path}`);
+                                                    }}
+                                                />
+                                            </div>
+                                        </div>
+                                    ) : imageAnalysis ? (
+                                        <div className="mb-4 text-xs text-text-secondary">
+                                            Image analysis available but file not found. Input files: {inputFiles.length > 0 ? JSON.stringify(inputFiles) : "none"}
+                                        </div>
+                                    ) : null}
                                     {imageAnalysis.vlm_description && (
                                         <div>
                                             <h4 className="text-sm font-semibold text-white mb-2">Description</h4>
@@ -467,7 +499,7 @@ export const ResultsPage: React.FC = () => {
                                         </div>
                                     )}
                                     {imageAnalysis.vlm_description?.objects && imageAnalysis.vlm_description.objects.length > 0 && (
-                                        <div>
+                                    <div>
                                             <h4 className="text-sm font-semibold text-white mb-2">Objects Detected</h4>
                                             <div className="flex flex-wrap gap-2">
                                                 {imageAnalysis.vlm_description.objects.map((obj: string, idx: number) => (
@@ -524,7 +556,7 @@ export const ResultsPage: React.FC = () => {
                                             {videoAnalysis.video_analysis.authenticity_verdict && (
                                                 <HoloBadge variant={getVerdictVariant(videoAnalysis.video_analysis.authenticity_verdict)}>
                                                     {videoAnalysis.video_analysis.authenticity_verdict}
-                                                </HoloBadge>
+                                            </HoloBadge>
                                             )}
                                         </div>
                                         {videoAnalysis.video_analysis.video_description && (
@@ -592,13 +624,13 @@ export const ResultsPage: React.FC = () => {
                 <div className="space-y-8">
                     {/* Cross-Modal Fusion */}
                     {fusionResults && (
-                        <div>
-                            <h2 className="text-2xl font-semibold text-white mb-4 flex items-center gap-2">
-                                <ShieldCheck className="text-ice-cyan" />
+                    <div>
+                        <h2 className="text-2xl font-semibold text-white mb-4 flex items-center gap-2">
+                            <ShieldCheck className="text-ice-cyan" />
                                 Cross-Modal Fusion
-                            </h2>
-                            <AntiGravityCard glowColor="blue">
-                                <div className="space-y-4">
+                        </h2>
+                        <AntiGravityCard glowColor="blue">
+                            <div className="space-y-4">
                                     {/* Content Relevance */}
                                     {fusionResults.content_relevance && (
                                         <div className={`p-3 rounded-lg border ${
@@ -629,7 +661,7 @@ export const ResultsPage: React.FC = () => {
                                                     <span className="text-text-secondary">Score:</span>
                                                     <span className="text-white">
                                                         {(fusionResults.content_relevance.relevance_score * 100).toFixed(1)}%
-                                                    </span>
+                                            </span>
                                                 </div>
                                                 {fusionResults.content_relevance.explanation && (
                                                     <p className="text-white/80 mt-2 text-xs">
@@ -662,7 +694,7 @@ export const ResultsPage: React.FC = () => {
                                                                 <li key={idx}>{finding}</li>
                                                             ))}
                                                         </ul>
-                                                    </div>
+                                    </div>
                                                 )}
                                                 {fusionResults.fusion_analysis.conflicts && fusionResults.fusion_analysis.conflicts.length > 0 && (
                                                     <div>
@@ -677,9 +709,9 @@ export const ResultsPage: React.FC = () => {
                                             </div>
                                         </div>
                                     )}
-                                </div>
-                            </AntiGravityCard>
-                        </div>
+                            </div>
+                        </AntiGravityCard>
+                    </div>
                     )}
 
                     {/* Summary Stats */}
@@ -695,11 +727,11 @@ export const ResultsPage: React.FC = () => {
                                     <HoloBadge variant={verdictVariant} className="text-xs">
                                         {verdict.replace(/_/g, " ")}
                                     </HoloBadge>
-                                </div>
+                                            </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-text-secondary text-sm">Confidence</span>
                                     <span className="text-white font-semibold">{(confidence * 100).toFixed(0)}%</span>
-                                </div>
+                                        </div>
                                 {results.timestamp && (
                                     <div className="flex justify-between items-center">
                                         <span className="text-text-secondary text-sm">Analyzed</span>

@@ -45,6 +45,45 @@ class TweetVerificationRequest(BaseModel):
     media_urls: Optional[list[str]] = []
 
 
+class InitializeVerificationRequest(BaseModel):
+    """Request to initialize a verification for multimodal analysis"""
+    input_types: list[str]  # e.g., ["text", "image", "video"]
+
+
+@router.post("/verify/initialize")
+async def initialize_verification(
+    request: InitializeVerificationRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Initialize a single verification record for multimodal analysis.
+    This ensures all analyses (text, image, video) use the same verification_id.
+    """
+    try:
+        # Create a single verification record
+        verification = Verification(
+            id=uuid.uuid4(),
+            input_type=InputType.TEXT,  # Default, but will handle multiple types
+            status=VerificationStatus.PENDING
+        )
+        db.add(verification)
+        db.commit()
+        db.refresh(verification)
+        
+        # Create storage directory
+        create_verification_storage(verification.id)
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "verification_id": str(verification.id),
+                "status": "initialized"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error initializing verification: {str(e)}")
+
+
 @router.post("/verify/text")
 async def verify_text(
     request: TextVerificationRequest,
@@ -176,16 +215,19 @@ async def verify_image(
 class VerifyImageByFileIdRequest(BaseModel):
     """Request to verify image by file_id"""
     file_id: str
+    verification_id: Optional[str] = None  # Optional: if provided, use existing verification
 
 
 class VerifyVideoByFileIdRequest(BaseModel):
     """Request to verify video by file_id"""
     file_id: str
+    verification_id: Optional[str] = None  # Optional: if provided, use existing verification
 
 
 class VerifyTextByContentRequest(BaseModel):
     """Request to verify text by content"""
     text: str
+    verification_id: Optional[str] = None  # Optional: if provided, use existing verification
 
 
 @router.post("/verify/image/by-file-id")
@@ -206,7 +248,7 @@ async def verify_image_by_file_id(
         }
     """
     try:
-        from services.storage import get_uploaded_file
+        from services.storage import get_uploaded_file, get_verification_storage_path
         from pathlib import Path
         import aiofiles
         
@@ -215,26 +257,71 @@ async def verify_image_by_file_id(
         if not image_path or not image_path.exists():
             raise HTTPException(status_code=404, detail=f"Image file not found for file_id: {request.file_id}")
         
-        # Read file content asynchronously
+        print(f"Image verification request - file_id: {request.file_id}, verification_id: {request.verification_id}")
+        
+        # CRITICAL: verification_id MUST be provided - raise error if not
+        if not request.verification_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="verification_id is required. Please initialize verification first using /verify/initialize"
+            )
+        
+        # Get or create verification with the provided ID
+        try:
+            verification_id = uuid.UUID(request.verification_id)
+            verification = db.query(Verification).filter(Verification.id == verification_id).first()
+            if not verification:
+                print(f"WARNING: Verification {request.verification_id} not found in DB, creating it now")
+                # Create verification record with the provided ID (should have been created by /verify/initialize)
+                verification = Verification(
+                    id=verification_id,
+                    input_type=InputType.TEXT,  # Use TEXT as default since it's multimodal
+                    status=VerificationStatus.PENDING
+                )
+                db.add(verification)
+                db.commit()
+                db.refresh(verification)
+                print(f"Created verification record: {verification_id}")
+            else:
+                print(f"Using existing verification: {verification_id}")
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid verification_id format: {request.verification_id}. Error: {str(e)}"
+            )
+        
+        # Create storage directory
+        create_verification_storage(verification_id)
+        
+        # Read file content
         async with aiofiles.open(image_path, "rb") as f:
             file_content = await f.read()
         
-        # Create verification record
-        verification = Verification(
-            id=uuid.uuid4(),
-            input_type=InputType.IMAGE,
-            status=VerificationStatus.PENDING
-        )
-        db.add(verification)
-        db.commit()
-        db.refresh(verification)
+        # Rename file to use verification_id and copy to verification storage
+        ext = image_path.suffix
+        filename = f"{verification_id}{ext}"
+        saved_path = await save_input_file(verification_id, filename, file_content)
         
-        # Create storage directory
-        create_verification_storage(verification.id)
+        # Also rename the file in uploads directory to match verification_id
+        from services.storage import get_upload_type_path
+        uploads_image_path = get_upload_type_path("image")
+        new_uploads_path = uploads_image_path / filename
         
-        # Copy file to verification storage
-        filename = image_path.name
-        saved_path = await save_input_file(verification.id, filename, file_content)
+        # Always write the file with verification_id name in uploads directory
+        async with aiofiles.open(new_uploads_path, "wb") as f:
+            await f.write(file_content)
+        print(f"Image file renamed in uploads: {image_path.name} -> {filename}")
+        
+        # Remove old file if it's different and exists
+        if image_path != new_uploads_path and image_path.exists():
+            try:
+                image_path.unlink()
+                print(f"Removed old image file: {image_path.name}")
+            except Exception as e:
+                print(f"Could not remove old image file {image_path.name}: {e}")
+        
+        # Use the renamed file for analysis
+        analysis_image_path = new_uploads_path
         
         # Perform Gemini VLM analysis
         vlm_description = {}
@@ -242,7 +329,7 @@ async def verify_image_by_file_id(
         
         try:
             # Task 1: Generate detailed factual description
-            vlm_description = await analyze_image_description(image_path)
+            vlm_description = await analyze_image_description(analysis_image_path)
         except Exception as e:
             logger.error(f"Error in image description analysis: {e}")
             vlm_description = {
@@ -257,7 +344,7 @@ async def verify_image_by_file_id(
         
         try:
             # Task 2: Detect AI-generation artifacts
-            vlm_artifact_analysis = await detect_ai_artifacts(image_path)
+            vlm_artifact_analysis = await detect_ai_artifacts(analysis_image_path)
         except Exception as e:
             logger.error(f"Error in artifact detection: {e}")
             vlm_artifact_analysis = {
@@ -271,26 +358,26 @@ async def verify_image_by_file_id(
         # Save image analysis results to JSON file
         from services.storage import save_image_analysis_json
         image_analysis_result = {
-            "verification_id": str(verification.id),
+            "verification_id": str(verification_id),
             "image_saved_path": str(saved_path),
             "vlm_description": vlm_description,
             "vlm_ai_artifact_analysis": vlm_artifact_analysis,
             "timestamp": datetime.utcnow().isoformat()
         }
         try:
-            await save_image_analysis_json(verification.id, image_analysis_result)
+            await save_image_analysis_json(verification_id, image_analysis_result)
         except Exception as e:
             logger.error(f"Error saving image analysis: {e}")
         
         # Trigger pipeline in background (optional, for downstream processing)
-        background_tasks.add_task(run_pipeline, verification.id, InputType.IMAGE)
+        background_tasks.add_task(run_pipeline, verification_id, InputType.IMAGE)
         
         return JSONResponse(
             status_code=200,
             content={
                 "status": "success",
                 "image_saved_path": str(saved_path),
-                "verification_id": str(verification.id),
+                "verification_id": str(verification_id),
                 "vlm_description": vlm_description,
                 "vlm_ai_artifact_analysis": vlm_artifact_analysis
             }
@@ -319,33 +406,88 @@ async def verify_video_by_file_id(
         }
     """
     try:
-        from services.storage import get_uploaded_file
+        from services.storage import get_uploaded_file, get_upload_type_path
         
         # Get the uploaded file path
         video_path = await get_uploaded_file(request.file_id, "video")
         if not video_path or not video_path.exists():
             raise HTTPException(status_code=404, detail=f"Video file not found for file_id: {request.file_id}")
         
-        # Read file content asynchronously
+        print(f"Video verification request - file_id: {request.file_id}, verification_id: {request.verification_id}")
+        
+        # CRITICAL: verification_id MUST be provided - raise error if not
+        if not request.verification_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="verification_id is required. Please initialize verification first using /verify/initialize"
+            )
+        
+        # Get or create verification with the provided ID
+        try:
+            verification_id = uuid.UUID(request.verification_id)
+            verification = db.query(Verification).filter(Verification.id == verification_id).first()
+            if not verification:
+                print(f"WARNING: Verification {request.verification_id} not found in DB, creating it now")
+                # Create verification record with the provided ID (should have been created by /verify/initialize)
+                verification = Verification(
+                    id=verification_id,
+                    input_type=InputType.TEXT,  # Use TEXT as default since it's multimodal
+                    status=VerificationStatus.PENDING
+                )
+                db.add(verification)
+                db.commit()
+                db.refresh(verification)
+                print(f"Created verification record: {verification_id}")
+            else:
+                print(f"Using existing verification: {verification_id}")
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid verification_id format: {request.verification_id}. Error: {str(e)}"
+            )
+        
+        # Create storage directory
+        create_verification_storage(verification_id)
+        
+        # Read file content
         async with aiofiles.open(video_path, "rb") as f:
             file_content = await f.read()
         
-        # Create verification record
-        verification = Verification(
-            id=uuid.uuid4(),
-            input_type=InputType.VIDEO,
-            status=VerificationStatus.PENDING
-        )
-        db.add(verification)
-        db.commit()
-        db.refresh(verification)
+        # Rename file to use verification_id and copy to verification storage
+        ext = video_path.suffix
+        filename = f"{verification_id}{ext}"
+        print(f"Saving video file with verification_id name: {filename}")
+        saved_path = await save_input_file(verification_id, filename, file_content)
+        print(f"Video saved to verification storage: {saved_path}")
         
-        # Create storage directory
-        create_verification_storage(verification.id)
+        # Also rename the file in uploads directory to match verification_id
+        uploads_video_path = get_upload_type_path("video")
+        new_uploads_path = uploads_video_path / filename
         
-        # Copy file to verification storage
-        filename = video_path.name
-        saved_path = await save_input_file(verification.id, filename, file_content)
+        # Always write the file with verification_id name in uploads directory
+        async with aiofiles.open(new_uploads_path, "wb") as f:
+            await f.write(file_content)
+        print(f"Video file renamed in uploads: {video_path.name} -> {filename} (path: {new_uploads_path})")
+        
+        # Remove old file if it's different and exists (remove file_id-based name)
+        if video_path != new_uploads_path and video_path.exists():
+            try:
+                video_path.unlink()
+                print(f"Removed old video file: {video_path.name}")
+            except Exception as e:
+                print(f"Could not remove old video file {video_path.name}: {e}")
+        
+        # Verify the file was saved correctly
+        if not new_uploads_path.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to save video file with verification_id name: {filename}"
+            )
+        
+        print(f"Video file successfully saved with verification_id: {verification_id}, filename: {filename}")
+        
+        # Use the renamed file for analysis
+        analysis_video_path = new_uploads_path
         
         # Perform Gemini video analysis
         video_analysis = {}
@@ -366,24 +508,24 @@ async def verify_video_by_file_id(
         # Save video analysis results to JSON file
         from services.storage import save_video_analysis_json
         video_analysis_result = {
-            "verification_id": str(verification.id),
+            "verification_id": str(verification_id),
             "video_saved_path": str(saved_path),
             "video_analysis": video_analysis,
             "timestamp": datetime.utcnow().isoformat()
         }
         try:
-            await save_video_analysis_json(verification.id, video_analysis_result)
+            await save_video_analysis_json(verification_id, video_analysis_result)
         except Exception as e:
             logger.error(f"Error saving video analysis: {e}")
         
         # Trigger background pipeline processing
-        background_tasks.add_task(run_pipeline, verification.id, InputType.VIDEO)
+        background_tasks.add_task(run_pipeline, verification_id, InputType.VIDEO)
         
         return JSONResponse(
             status_code=200,
             content={
                 "status": "success",
-                "verification_id": str(verification.id),
+                "verification_id": str(verification_id),
                 "video_saved_path": str(saved_path),
                 "video_analysis": video_analysis
             }
@@ -413,21 +555,56 @@ async def verify_text_by_content(
         }
     """
     try:
-        # Create verification record
-        verification = Verification(
-            id=uuid.uuid4(),
-            input_type=InputType.TEXT,
-            status=VerificationStatus.PENDING
-        )
-        db.add(verification)
-        db.commit()
-        db.refresh(verification)
+        print(f"Text verification request - verification_id: {request.verification_id}")
+        
+        # Get or create verification
+        if request.verification_id:
+            try:
+                verification_id = uuid.UUID(request.verification_id)
+                verification = db.query(Verification).filter(Verification.id == verification_id).first()
+                if not verification:
+                    print(f"WARNING: Verification {request.verification_id} not found, creating new one")
+                    # Create new verification record if not found
+                    verification = Verification(
+                        id=verification_id,
+                        input_type=InputType.TEXT,
+                        status=VerificationStatus.PENDING
+                    )
+                    db.add(verification)
+                    db.commit()
+                    db.refresh(verification)
+                else:
+                    print(f"Using existing verification: {verification_id}")
+            except ValueError as e:
+                print(f"ERROR: Invalid verification_id format: {request.verification_id}, creating new one")
+                # Create new verification record
+                verification = Verification(
+                    id=uuid.uuid4(),
+                    input_type=InputType.TEXT,
+                    status=VerificationStatus.PENDING
+                )
+                db.add(verification)
+                db.commit()
+                db.refresh(verification)
+                verification_id = verification.id
+        else:
+            print(f"WARNING: No verification_id provided, creating new verification")
+            # Create new verification record
+            verification = Verification(
+                id=uuid.uuid4(),
+                input_type=InputType.TEXT,
+                status=VerificationStatus.PENDING
+            )
+            db.add(verification)
+            db.commit()
+            db.refresh(verification)
+            verification_id = verification.id
         
         # Create storage directory
-        create_verification_storage(verification.id)
+        create_verification_storage(verification_id)
         
         # Save input text
-        await save_text_input(verification.id, request.text)
+        await save_text_input(verification_id, request.text)
         
         # Call coordinator agent
         coordinator_response = {}
@@ -454,25 +631,25 @@ async def verify_text_by_content(
         # Save text analysis results to JSON file
         from services.storage import save_text_analysis_json
         text_analysis_result = {
-            "verification_id": str(verification.id),
+            "verification_id": str(verification_id),
             "coordinator_response": coordinator_response,
             "structured_data": structured_data,
             "coordinator_output": coordinator_output,
             "timestamp": datetime.utcnow().isoformat()
         }
         try:
-            await save_text_analysis_json(verification.id, text_analysis_result)
+            await save_text_analysis_json(verification_id, text_analysis_result)
         except Exception as e:
             logger.error(f"Error saving text analysis: {e}")
         
         # Trigger pipeline in background (optional, for downstream processing)
-        background_tasks.add_task(run_pipeline, verification.id, InputType.TEXT)
+        background_tasks.add_task(run_pipeline, verification_id, InputType.TEXT)
         
         return JSONResponse(
             status_code=200,
             content={
                 "status": "success",
-                "verification_id": str(verification.id),
+                "verification_id": str(verification_id),
                 "coordinator_response": coordinator_response,
                 "structured_data": structured_data,
                 "coordinator_output": coordinator_output

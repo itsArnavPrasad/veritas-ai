@@ -82,12 +82,53 @@ export const PipelineScreen: React.FC = () => {
     // Use ref to track if analysis has been initiated to prevent duplicate calls
     const analysisInitiated = useRef<Set<string>>(new Set());
 
-    // Analyze images, videos, and text when component mounts
+    // Initialize verification and analyze inputs when component mounts
     useEffect(() => {
         const analyzeInputs = async () => {
             const imageInputs = inputs.filter((input: any) => input.type === "image" && input.file_id);
             const videoInputs = inputs.filter((input: any) => input.type === "video" && input.file_id);
             const textInputs = inputs.filter((input: any) => input.type === "text" && input.content);
+            
+            if (imageInputs.length === 0 && videoInputs.length === 0 && textInputs.length === 0) {
+                return; // No inputs to analyze
+            }
+            
+            // Initialize a single verification for all analyses
+            let currentVerificationId = verificationId;
+            if (!currentVerificationId) {
+                try {
+                    const inputTypes = [];
+                    if (textInputs.length > 0) inputTypes.push("text");
+                    if (imageInputs.length > 0) inputTypes.push("image");
+                    if (videoInputs.length > 0) inputTypes.push("video");
+                    
+                    const initResponse = await fetch(`${API_BASE_URL}/api/v1/verify/initialize`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({ input_types: inputTypes }),
+                    });
+                    
+                    if (initResponse.ok) {
+                        const initData = await initResponse.json();
+                        currentVerificationId = initData.verification_id;
+                        setVerificationId(currentVerificationId);
+                        setActivityLogs((prev) => [
+                            ...prev,
+                            { 
+                                time: new Date().toLocaleTimeString(), 
+                                agent: "Orchestrator", 
+                                message: `Verification initialized: ${currentVerificationId}` 
+                            },
+                        ]);
+                    } else {
+                        console.error("Failed to initialize verification");
+                    }
+                } catch (error) {
+                    console.error("Error initializing verification:", error);
+                }
+            }
             
             if (imageInputs.length > 0 || videoInputs.length > 0 || textInputs.length > 0) {
                 setActivityLogs((prev) => [
@@ -124,7 +165,10 @@ export const PipelineScreen: React.FC = () => {
                         headers: {
                             "Content-Type": "application/json",
                         },
-                        body: JSON.stringify({ file_id: input.file_id }),
+                        body: JSON.stringify({ 
+                            file_id: input.file_id,
+                            verification_id: currentVerificationId 
+                        }),
                     });
                     
                     if (response.ok) {
@@ -199,7 +243,10 @@ export const PipelineScreen: React.FC = () => {
                         headers: {
                             "Content-Type": "application/json",
                         },
-                        body: JSON.stringify({ file_id: input.file_id }),
+                        body: JSON.stringify({ 
+                            file_id: input.file_id,
+                            verification_id: currentVerificationId 
+                        }),
                     });
                     
                     if (response.ok) {
@@ -274,7 +321,10 @@ export const PipelineScreen: React.FC = () => {
                         headers: {
                             "Content-Type": "application/json",
                         },
-                        body: JSON.stringify({ text: input.content }),
+                        body: JSON.stringify({ 
+                            text: input.content,
+                            verification_id: currentVerificationId 
+                        }),
                     });
                     
                     if (response.ok) {
@@ -328,7 +378,7 @@ export const PipelineScreen: React.FC = () => {
         
         analyzeInputs();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Empty dependency array - only run once on mount
+    }, [inputs.length]); // Run when inputs change
 
     // Trigger cross-modal fusion when all analyses are complete
     useEffect(() => {
