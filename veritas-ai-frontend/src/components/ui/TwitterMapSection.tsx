@@ -87,10 +87,47 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
         };
     }, []);
 
+    const handleStopStream = async () => {
+        if (!streamId) return;
+        
+        try {
+            // Stop the stream on backend
+            const response = await fetch(`${API_BASE_URL}/api/v1/stop_stream`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ stream_id: streamId }),
+            });
+            
+            if (!response.ok) {
+                console.error("Failed to stop stream");
+            }
+        } catch (error) {
+            console.error("Error stopping stream:", error);
+        } finally {
+            // Close EventSource connection
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+                eventSourceRef.current = null;
+            }
+            
+            // Reset state
+            setIsStreaming(false);
+            setStreamId(null);
+        }
+    };
+
     const handleSearch = async () => {
+        // If already streaming, stop it
+        if (isStreaming && streamId) {
+            await handleStopStream();
+            return;
+        }
+        
         if (!query.trim()) return;
         
-        // Stop existing stream
+        // Stop existing stream if any
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
             eventSourceRef.current = null;
@@ -338,7 +375,7 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
                         />
                         <NeonButton 
                             onClick={handleSearch}
-                            disabled={isLoading || isStreaming}
+                            disabled={isLoading}
                         >
                             {isLoading ? (
                                 <>
@@ -348,7 +385,7 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
                             ) : isStreaming ? (
                                 <>
                                     <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse mr-2" />
-                                    Streaming
+                                    Stop Streaming
                                 </>
                             ) : (
                                 "Search"

@@ -1,11 +1,8 @@
 # agent.py
 # Coordinator/Orchestration Agent for Text Verification Module
 # Follows https://google.github.io/adk-docs/get-started/quickstart/ for setup details
-from google.adk.agents import SequentialAgent, LlmAgent
-from google.genai import types
 
-# Import all agent components
-# ADK adds the agents directory to sys.path when loading, so we use absolute imports
+# Configure logging BEFORE importing ADK to suppress verbose logs
 import sys
 import os
 
@@ -15,6 +12,21 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 agents_dir = os.path.dirname(current_dir)
 if agents_dir not in sys.path:
     sys.path.insert(0, agents_dir)
+
+# Import logging configuration to suppress verbose ADK logs
+try:
+    import logging_config  # This will configure logging to suppress INFO logs from ADK
+except ImportError:
+    # If logging_config is not found, configure logging here
+    import logging
+    logging.getLogger('google.adk').setLevel(logging.WARNING)
+    logging.getLogger('google_llm').setLevel(logging.WARNING)
+
+from google.adk.agents import SequentialAgent, LlmAgent
+from google.genai import types
+
+# Import all agent components
+# ADK adds the agents directory to sys.path when loading, so we use absolute imports
 
 # Now import using absolute imports (relative to agents directory)
 from raw_text_preprocess.agent import preprocessing_agent

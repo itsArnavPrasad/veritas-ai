@@ -32,3 +32,6 @@ PIPELINE_STAGES = [
     "final_verdict"
 ]
 
+# ADK Configuration
+ADK_SERVER_URL = os.getenv("ADK_SERVER_URL", "http://localhost:8000")
+

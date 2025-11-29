@@ -1,19 +1,18 @@
 """
-Coordinator agent module.
-Configures logging to suppress verbose ADK library logs.
+Logging configuration for ADK agents.
+Suppresses verbose INFO logs from Google ADK library and only shows model outputs.
 """
 import logging
 import sys
 
-# Configure logging BEFORE any ADK imports
-# Suppress verbose INFO logs from Google ADK library
+# Configure root logger
 logging.basicConfig(
-    level=logging.WARNING,  # Only show WARNING and above
+    level=logging.WARNING,  # Only show WARNING and above by default
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stderr,
-    force=True  # Override any existing configuration
+    stream=sys.stderr
 )
 
+# Suppress verbose logs from Google ADK library
 # Set specific loggers to WARNING level to hide INFO messages
 adk_loggers = [
     'google.adk',
@@ -26,14 +25,16 @@ adk_loggers = [
     'google.adk.backends.google_llm',
     'google.adk.backends.google_llm.google_llm',  # Full path to the logger
     'google.genai',
-    'google',  # Catch-all for google.* loggers
+    # Also try to catch any logger that might be used
+    'google',
 ]
 
 for logger_name in adk_loggers:
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.WARNING)  # Only show WARNING and ERROR
 
-# Now import the agent (logging is already configured)
-from .agent import root_agent
+# Keep your own agent logs at INFO level if needed
+# Uncomment and modify if you want to see your agent logs
+# agent_logger = logging.getLogger('coordinator')
+# agent_logger.setLevel(logging.INFO)
 
-__all__ = ['root_agent']

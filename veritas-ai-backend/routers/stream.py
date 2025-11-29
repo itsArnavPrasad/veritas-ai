@@ -91,6 +91,36 @@ async def start_stream(request: StartStreamRequest):
         raise HTTPException(status_code=500, detail=f"Error starting stream: {str(e)}")
 
 
+class StopStreamRequest(BaseModel):
+    """Request to stop a stream"""
+    stream_id: str
+
+
+@router.post("/stop_stream")
+async def stop_stream(request: StopStreamRequest):
+    """
+    Stop an active stream
+    
+    Returns:
+        { "status": "stopped", "stream_id": "<uuid>" }
+    """
+    try:
+        print(f"\n🛑 API REQUEST: /stop_stream")
+        print(f"   Stream ID: '{request.stream_id}'")
+        
+        if not stream_manager.is_stream_active(request.stream_id):
+            raise HTTPException(status_code=404, detail="Stream not found or already stopped")
+        
+        stream_manager.stop_stream(request.stream_id)
+        print(f"   ✅ Stream stopped successfully")
+        return {"status": "stopped", "stream_id": request.stream_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"   ❌ Error stopping stream: {e}")
+        raise HTTPException(status_code=500, detail=f"Error stopping stream: {str(e)}")
+
+
 @router.get("/stream/{stream_id}")
 async def stream_clusters(stream_id: str):
     """
@@ -129,7 +159,7 @@ async def stream_clusters(stream_id: str):
                         continue
                     
                 except Exception as e:
-                    logger.error(f"Error in cluster event generator: {e}")
+                    print(f"Error in cluster event generator: {e}")
                     await asyncio.sleep(1)
                     continue
                     

@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "../../lib/utils";
 import type { LucideIcon } from "lucide-react";
@@ -23,6 +24,8 @@ export const PipelineNode: React.FC<PipelineNodeProps> = ({
     size = "md",
 }) => {
     const [isHovered, setIsHovered] = useState(false);
+    const nodeRef = useRef<HTMLDivElement>(null);
+    const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
 
     const sizeClasses = {
         sm: "w-10 h-10",
@@ -44,8 +47,20 @@ export const PipelineNode: React.FC<PipelineNodeProps> = ({
         danger: "border-alert-red bg-alert-red/10 text-alert-red shadow-[0_0_20px_-5px_#F85149]",
     };
 
+    useEffect(() => {
+        if (isHovered && nodeRef.current) {
+            const rect = nodeRef.current.getBoundingClientRect();
+            setTooltipPosition({
+                top: rect.top - 10,
+                left: rect.left + rect.width / 2,
+            });
+        }
+    }, [isHovered]);
+
     return (
+        <>
         <div
+            ref={nodeRef}
             className={cn("relative flex flex-col items-center group z-10", className)}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
@@ -82,14 +97,17 @@ export const PipelineNode: React.FC<PipelineNodeProps> = ({
             {/* Label */}
             <motion.div
                 className={cn(
-                    "absolute top-full mt-3 text-center w-32 transition-colors duration-300",
+                    "absolute top-full mt-3 text-center w-36 transition-colors duration-300 whitespace-nowrap",
                     isActive || isHovered ? "text-white font-medium" : "text-text-secondary/70 text-sm"
                 )}
             >
                 {label}
             </motion.div>
 
-            {/* Tooltip */}
+        </div>
+        
+        {/* Tooltip rendered via portal to ensure it's above everything */}
+        {typeof document !== 'undefined' && createPortal(
             <AnimatePresence>
                 {isHovered && details && (
                     <motion.div
@@ -97,7 +115,12 @@ export const PipelineNode: React.FC<PipelineNodeProps> = ({
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 10, scale: 0.9 }}
                         transition={{ duration: 0.2 }}
-                        className="absolute bottom-full mb-4 min-w-[180px] p-3 rounded-lg bg-black/90 border border-white/20 backdrop-blur-xl shadow-xl z-50 pointer-events-none"
+                        className="fixed min-w-[180px] p-3 rounded-lg bg-black/95 border border-white/30 backdrop-blur-2xl shadow-2xl z-[9999] pointer-events-none"
+                        style={{
+                            top: `${tooltipPosition.top - 80}px`,
+                            left: `${tooltipPosition.left}px`,
+                            transform: 'translateX(-50%)',
+                        }}
                     >
                         <div className="space-y-2">
                             {Object.entries(details).map(([key, value]) => (
@@ -108,10 +131,12 @@ export const PipelineNode: React.FC<PipelineNodeProps> = ({
                             ))}
                         </div>
                         {/* Arrow */}
-                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-white/20" />
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-white/30" />
                     </motion.div>
                 )}
-            </AnimatePresence>
-        </div>
+            </AnimatePresence>,
+            document.body
+        )}
+        </>
     );
 };
