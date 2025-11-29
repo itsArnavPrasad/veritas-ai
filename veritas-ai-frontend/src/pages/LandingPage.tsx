@@ -2,12 +2,10 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Layout } from "../components/layout/Layout";
 import { AntiGravityCard } from "../components/ui/AntiGravityCard";
-import { GlassInput } from "../components/ui/GlassInput";
 import { NeonButton } from "../components/ui/NeonButton";
 import { useNavigate } from "react-router-dom";
-import { FileText, Image as ImageIcon, Video, Plus, X, ArrowRight, Upload, Clock } from "lucide-react";
+import { FileText, Image as ImageIcon, Video, Plus, X, ArrowRight, Upload } from "lucide-react";
 import { cn } from "../lib/utils";
-import { HistoryPanel } from "../components/ui/HistoryPanel";
 import { TwitterMapSection } from "../components/ui/TwitterMapSection";
 
 type InputType = "text" | "image" | "video";
@@ -30,8 +28,6 @@ export const LandingPage: React.FC = () => {
     const [inputValue, setInputValue] = useState("");
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState<string>("");
-
-    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
     const addInput = () => {
         if (!inputValue.trim()) return;
@@ -138,19 +134,6 @@ export const LandingPage: React.FC = () => {
 
     return (
         <Layout className="flex flex-col items-center justify-center min-h-[calc(100vh-4rem)]">
-            {/* History Button */}
-            <div className="absolute top-6 right-6 z-50">
-                <NeonButton
-                    variant="secondary"
-                    onClick={() => setIsHistoryOpen(true)}
-                    className="flex items-center gap-2 !px-4 !py-2"
-                >
-                    <Clock size={18} /> History
-                </NeonButton>
-            </div>
-
-            <HistoryPanel isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
-
             {/* Hero Section */}
             <motion.div
                 initial={{ opacity: 0, y: -30 }}

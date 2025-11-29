@@ -4,6 +4,7 @@ from google.genai import types
 
 from .prompt import PREPROCESS_INSTRUCTION
 from .models import PreprocessData
+from .date_time_tool import current_datetime_tool
 
 # Create the preprocessing LLM agent
 preprocessing_agent = LlmAgent(
@@ -18,4 +19,5 @@ preprocessing_agent = LlmAgent(
     generate_content_config=types.GenerateContentConfig(temperature=0.0),
     output_schema=PreprocessData,
     output_key="preprocess_data",
+    tools=[current_datetime_tool],  # Add date/time tool for temporal context
 )
