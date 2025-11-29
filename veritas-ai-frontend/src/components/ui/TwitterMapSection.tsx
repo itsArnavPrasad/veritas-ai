@@ -357,7 +357,7 @@ export const TwitterMapSection: React.FC<TwitterMapSectionProps> = ({ onVerifyTw
                     <div>
                         <h2 className="text-3xl font-bold text-white flex items-center gap-3">
                             <Twitter className="text-ice-cyan" size={32} />
-                            Live Threat Intelligence
+                            Live News Intelligence
                         </h2>
                         <p className="text-text-secondary mt-2">
                             Monitor real-time social signals and verify emerging threats.

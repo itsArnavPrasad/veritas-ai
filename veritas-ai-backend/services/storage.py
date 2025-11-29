@@ -50,17 +50,6 @@ async def save_text_input(verification_id: UUID, text: str) -> Path:
     return input_path
 
 
-async def save_claims_json(verification_id: UUID, claims: list) -> Path:
-    """Save claims to JSON file"""
-    storage_path = get_verification_storage_path(verification_id)
-    output_path = storage_path / "outputs" / "claims.json"
-    
-    async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
-        await f.write(json.dumps(claims, indent=2, ensure_ascii=False))
-    
-    return output_path
-
-
 async def save_results_json(verification_id: UUID, results: Dict[str, Any]) -> Path:
     """Save results to JSON file"""
     storage_path = get_verification_storage_path(verification_id)
@@ -70,27 +59,6 @@ async def save_results_json(verification_id: UUID, results: Dict[str, Any]) -> P
         await f.write(json.dumps(results, indent=2, ensure_ascii=False))
     
     return output_path
-
-
-async def append_log(verification_id: UUID, log_entry: Dict[str, Any]) -> None:
-    """Append a log entry to logs.json"""
-    storage_path = get_verification_storage_path(verification_id)
-    logs_path = storage_path / "outputs" / "logs.json"
-    
-    # Read existing logs if file exists
-    logs = []
-    if logs_path.exists():
-        async with aiofiles.open(logs_path, "r", encoding="utf-8") as f:
-            content = await f.read()
-            if content:
-                logs = json.loads(content)
-    
-    # Append new log entry
-    logs.append(log_entry)
-    
-    # Write back
-    async with aiofiles.open(logs_path, "w", encoding="utf-8") as f:
-        await f.write(json.dumps(logs, indent=2, ensure_ascii=False))
 
 
 async def read_results_json(verification_id: UUID) -> Optional[Dict[str, Any]]:
@@ -106,15 +74,98 @@ async def read_results_json(verification_id: UUID) -> Optional[Dict[str, Any]]:
         return json.loads(content)
 
 
-async def read_claims_json(verification_id: UUID) -> Optional[list]:
-    """Read claims from JSON file"""
+async def save_text_analysis_json(verification_id: UUID, text_analysis: Dict[str, Any]) -> Path:
+    """Save text analysis to JSON file"""
     storage_path = get_verification_storage_path(verification_id)
-    claims_path = storage_path / "outputs" / "claims.json"
+    output_path = storage_path / "outputs" / "text_analysis.json"
     
-    if not claims_path.exists():
+    async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
+        await f.write(json.dumps(text_analysis, indent=2, ensure_ascii=False))
+    
+    return output_path
+
+
+async def save_image_analysis_json(verification_id: UUID, image_analysis: Dict[str, Any]) -> Path:
+    """Save image analysis to JSON file"""
+    storage_path = get_verification_storage_path(verification_id)
+    output_path = storage_path / "outputs" / "image_analysis.json"
+    
+    async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
+        await f.write(json.dumps(image_analysis, indent=2, ensure_ascii=False))
+    
+    return output_path
+
+
+async def save_video_analysis_json(verification_id: UUID, video_analysis: Dict[str, Any]) -> Path:
+    """Save video analysis to JSON file"""
+    storage_path = get_verification_storage_path(verification_id)
+    output_path = storage_path / "outputs" / "video_analysis.json"
+    
+    async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
+        await f.write(json.dumps(video_analysis, indent=2, ensure_ascii=False))
+    
+    return output_path
+
+
+async def save_fusion_results_json(verification_id: UUID, fusion_results: Dict[str, Any]) -> Path:
+    """Save fusion results to JSON file"""
+    storage_path = get_verification_storage_path(verification_id)
+    output_path = storage_path / "outputs" / "fusion_results.json"
+    
+    async with aiofiles.open(output_path, "w", encoding="utf-8") as f:
+        await f.write(json.dumps(fusion_results, indent=2, ensure_ascii=False))
+    
+    return output_path
+
+
+async def read_text_analysis_json(verification_id: UUID) -> Optional[Dict[str, Any]]:
+    """Read text analysis from JSON file"""
+    storage_path = get_verification_storage_path(verification_id)
+    text_path = storage_path / "outputs" / "text_analysis.json"
+    
+    if not text_path.exists():
         return None
     
-    async with aiofiles.open(claims_path, "r", encoding="utf-8") as f:
+    async with aiofiles.open(text_path, "r", encoding="utf-8") as f:
+        content = await f.read()
+        return json.loads(content)
+
+
+async def read_image_analysis_json(verification_id: UUID) -> Optional[Dict[str, Any]]:
+    """Read image analysis from JSON file"""
+    storage_path = get_verification_storage_path(verification_id)
+    image_path = storage_path / "outputs" / "image_analysis.json"
+    
+    if not image_path.exists():
+        return None
+    
+    async with aiofiles.open(image_path, "r", encoding="utf-8") as f:
+        content = await f.read()
+        return json.loads(content)
+
+
+async def read_video_analysis_json(verification_id: UUID) -> Optional[Dict[str, Any]]:
+    """Read video analysis from JSON file"""
+    storage_path = get_verification_storage_path(verification_id)
+    video_path = storage_path / "outputs" / "video_analysis.json"
+    
+    if not video_path.exists():
+        return None
+    
+    async with aiofiles.open(video_path, "r", encoding="utf-8") as f:
+        content = await f.read()
+        return json.loads(content)
+
+
+async def read_fusion_results_json(verification_id: UUID) -> Optional[Dict[str, Any]]:
+    """Read fusion results from JSON file"""
+    storage_path = get_verification_storage_path(verification_id)
+    fusion_path = storage_path / "outputs" / "fusion_results.json"
+    
+    if not fusion_path.exists():
+        return None
+    
+    async with aiofiles.open(fusion_path, "r", encoding="utf-8") as f:
         content = await f.read()
         return json.loads(content)
 

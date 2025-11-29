@@ -10,9 +10,7 @@ from sqlalchemy.orm import Session
 from models.verification import Verification, VerificationStatus, InputType
 from services.storage import (
     create_verification_storage,
-    save_claims_json,
-    save_results_json,
-    append_log
+    save_results_json
 )
 from services.database import SessionLocal
 from config import PIPELINE_STAGES
@@ -57,12 +55,6 @@ async def preprocess(verification_id: uuid.UUID, input_type: InputType, db: Sess
         "Starting preprocessing..."
     )
     
-    await append_log(verification_id, {
-        "stage": "preprocessing",
-        "timestamp": datetime.utcnow().isoformat(),
-        "message": "Starting preprocessing"
-    })
-    
     await asyncio.sleep(1)  # Simulate processing
     
     result = {
@@ -90,12 +82,6 @@ async def extract_claims(verification_id: uuid.UUID, db: Session) -> list:
         "Extracting claims..."
     )
     
-    await append_log(verification_id, {
-        "stage": "claim_extraction",
-        "timestamp": datetime.utcnow().isoformat(),
-        "message": "Extracting claims from input"
-    })
-    
     await asyncio.sleep(1)  # Simulate processing
     
     # Mock claims
@@ -116,8 +102,6 @@ async def extract_claims(verification_id: uuid.UUID, db: Session) -> list:
         }
     ]
     
-    await save_claims_json(verification_id, claims)
-    
     await send_sse_event(
         str(verification_id),
         "claim_extraction",
@@ -136,12 +120,6 @@ async def run_retrieval(verification_id: uuid.UUID, claims: list, db: Session) -
         50.0,
         "Retrieving evidence..."
     )
-    
-    await append_log(verification_id, {
-        "stage": "retrieval",
-        "timestamp": datetime.utcnow().isoformat(),
-        "message": "Retrieving evidence from knowledge base"
-    })
     
     await asyncio.sleep(1)  # Simulate processing
     
@@ -169,12 +147,6 @@ async def run_forensics(verification_id: uuid.UUID, db: Session) -> Dict[str, An
         70.0,
         "Running forensic analysis..."
     )
-    
-    await append_log(verification_id, {
-        "stage": "forensics",
-        "timestamp": datetime.utcnow().isoformat(),
-        "message": "Running forensic analysis on media"
-    })
     
     await asyncio.sleep(1)  # Simulate processing
     
@@ -206,12 +178,6 @@ async def judge(verification_id: uuid.UUID, claims: list, db: Session) -> Dict[s
         "Analyzing consistency..."
     )
     
-    await append_log(verification_id, {
-        "stage": "consistency",
-        "timestamp": datetime.utcnow().isoformat(),
-        "message": "Analyzing claim consistency"
-    })
-    
     await asyncio.sleep(1)  # Simulate processing
     
     await send_sse_event(
@@ -220,12 +186,6 @@ async def judge(verification_id: uuid.UUID, claims: list, db: Session) -> Dict[s
         90.0,
         "Generating final verdict..."
     )
-    
-    await append_log(verification_id, {
-        "stage": "final_verdict",
-        "timestamp": datetime.utcnow().isoformat(),
-        "message": "Generating final verdict"
-    })
     
     await asyncio.sleep(1)  # Simulate processing
     
@@ -278,15 +238,12 @@ async def run_pipeline(
         forensics_result = await run_forensics(verification_id, db)
         verdict = await judge(verification_id, claims, db)
         
-        # Compile final results
+        # Compile final results (legacy format for backward compatibility)
         final_results = {
             "verification_id": str(verification_id),
             "status": "done",
             "verdict": verdict["verdict"],
             "confidence": verdict["confidence"],
-            "claims": claims,
-            "media_analysis": forensics_result.get("media_analysis", {}),
-            "evidence": retrieval_result,
             "explanation": verdict["explanation"],
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -298,25 +255,12 @@ async def run_pipeline(
         verification.status = VerificationStatus.DONE
         db.commit()
         
-        await append_log(verification_id, {
-            "stage": "complete",
-            "timestamp": datetime.utcnow().isoformat(),
-            "message": "Pipeline completed successfully"
-        })
-        
     except Exception as e:
         # Update status to error
         verification = db.query(Verification).filter(Verification.id == verification_id).first()
         if verification:
             verification.status = VerificationStatus.ERROR
             db.commit()
-        
-        await append_log(verification_id, {
-            "stage": "error",
-            "timestamp": datetime.utcnow().isoformat(),
-            "message": f"Pipeline error: {str(e)}",
-            "error": str(e)
-        })
         
         await send_sse_event(
             str(verification_id),

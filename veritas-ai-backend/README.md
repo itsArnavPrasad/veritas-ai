@@ -96,9 +96,11 @@ backend/
 All verification inputs and outputs are stored locally in `storage/verifications/{verification_id}/`:
 
 - `input/` - Original input files
-- `outputs/claims.json` - Extracted claims
-- `outputs/results.json` - Final verification results
-- `outputs/logs.json` - Pipeline execution logs
+- `outputs/text_analysis.json` - Text analysis results (if text analysis performed)
+- `outputs/image_analysis.json` - Image analysis results (if image analysis performed)
+- `outputs/video_analysis.json` - Video analysis results (if video analysis performed)
+- `outputs/fusion_results.json` - Cross-modal fusion results (when fusion completes)
+- `outputs/results.json` - Legacy results file (for backward compatibility)
 
 ## Development
 

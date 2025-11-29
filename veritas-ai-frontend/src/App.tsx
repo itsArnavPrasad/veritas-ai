@@ -11,7 +11,7 @@ function App() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/pipeline" element={<PipelineScreen />} />
-          <Route path="/results" element={<ResultsPage />} />
+          <Route path="/results/:verificationId" element={<ResultsPage />} />
         </Routes>
       </Router>
     </ErrorBoundary>

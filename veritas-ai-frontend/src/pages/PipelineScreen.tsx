@@ -74,6 +74,7 @@ export const PipelineScreen: React.FC = () => {
     const [fusionResults, setFusionResults] = useState<any>(null);
     const [isFusing, setIsFusing] = useState(false);
     const [fusionInitiated, setFusionInitiated] = useState(false);
+    const [verificationId, setVerificationId] = useState<string | null>(null);
     const [activityLogs, setActivityLogs] = useState<Array<{ time: string; agent: string; message: string }>>([
         { time: "10:42:01", agent: "Orchestrator", message: "Initiating multimodal pipeline..." },
     ]);
@@ -377,9 +378,13 @@ export const PipelineScreen: React.FC = () => {
                         : null;
                     
                     // Get verification_id from any analysis result
-                    const verificationId = textAnalysis?.verification_id || 
+                    const verificationIdValue = textAnalysis?.verification_id || 
                                          imageAnalysis?.verification_id || 
                                          videoAnalysis?.verification_id;
+                    
+                    if (verificationIdValue) {
+                        setVerificationId(verificationIdValue);
+                    }
                     
                     const response = await fetch(`${API_BASE_URL}/api/v1/verify/cross-modal-fusion`, {
                         method: "POST",
@@ -390,7 +395,7 @@ export const PipelineScreen: React.FC = () => {
                             text_analysis: textAnalysis,
                             image_analysis: imageAnalysis,
                             video_analysis: videoAnalysis,
-                            verification_id: verificationId
+                            verification_id: verificationIdValue
                         }),
                     });
                     
@@ -1541,7 +1546,7 @@ export const PipelineScreen: React.FC = () => {
                                 animate={{ opacity: 1, y: 0 }}
                                 className="p-4 border-t border-white/10"
                             >
-                                <Link to="/results">
+                                <Link to={`/results/${verificationId || 'unknown'}`}>
                                     <NeonButton className="w-full flex items-center justify-center gap-2">
                                         View Results <ArrowRight size={16} />
                                     </NeonButton>

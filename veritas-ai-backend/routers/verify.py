@@ -268,6 +268,20 @@ async def verify_image_by_file_id(
                 "explanation": ""
             }
         
+        # Save image analysis results to JSON file
+        from services.storage import save_image_analysis_json
+        image_analysis_result = {
+            "verification_id": str(verification.id),
+            "image_saved_path": str(saved_path),
+            "vlm_description": vlm_description,
+            "vlm_ai_artifact_analysis": vlm_artifact_analysis,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        try:
+            await save_image_analysis_json(verification.id, image_analysis_result)
+        except Exception as e:
+            logger.error(f"Error saving image analysis: {e}")
+        
         # Trigger pipeline in background (optional, for downstream processing)
         background_tasks.add_task(run_pipeline, verification.id, InputType.IMAGE)
         
@@ -349,6 +363,19 @@ async def verify_video_by_file_id(
                 "authenticity_verdict": "UNCERTAIN"
             }
         
+        # Save video analysis results to JSON file
+        from services.storage import save_video_analysis_json
+        video_analysis_result = {
+            "verification_id": str(verification.id),
+            "video_saved_path": str(saved_path),
+            "video_analysis": video_analysis,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        try:
+            await save_video_analysis_json(verification.id, video_analysis_result)
+        except Exception as e:
+            logger.error(f"Error saving video analysis: {e}")
+        
         # Trigger background pipeline processing
         background_tasks.add_task(run_pipeline, verification.id, InputType.VIDEO)
         
@@ -423,6 +450,20 @@ async def verify_text_by_content(
             coordinator_response = {
                 "error": str(e)
             }
+        
+        # Save text analysis results to JSON file
+        from services.storage import save_text_analysis_json
+        text_analysis_result = {
+            "verification_id": str(verification.id),
+            "coordinator_response": coordinator_response,
+            "structured_data": structured_data,
+            "coordinator_output": coordinator_output,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        try:
+            await save_text_analysis_json(verification.id, text_analysis_result)
+        except Exception as e:
+            logger.error(f"Error saving text analysis: {e}")
         
         # Trigger pipeline in background (optional, for downstream processing)
         background_tasks.add_task(run_pipeline, verification.id, InputType.TEXT)
@@ -612,20 +653,29 @@ async def cross_modal_fusion(
                 from services.storage import create_verification_storage
                 create_verification_storage(verification_id)
                 
-                # Compile final results with all outputs
-                final_results = {
-                    "verification_id": str(verification_id),
-                    "status": "done",
-                    "fusion_results": fusion_results,
-                    "all_outputs": {
-                        "text_analysis": request.text_analysis,
-                        "image_analysis": request.image_analysis,
-                        "video_analysis": request.video_analysis
-                    },
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                # Save each analysis type to separate JSON files
+                from services.storage import (
+                    save_text_analysis_json,
+                    save_image_analysis_json,
+                    save_video_analysis_json,
+                    save_fusion_results_json
+                )
                 
-                await save_results_json(verification_id, final_results)
+                # Save text analysis if present
+                if request.text_analysis:
+                    await save_text_analysis_json(verification_id, request.text_analysis)
+                
+                # Save image analysis if present
+                if request.image_analysis:
+                    await save_image_analysis_json(verification_id, request.image_analysis)
+                
+                # Save video analysis if present
+                if request.video_analysis:
+                    await save_video_analysis_json(verification_id, request.video_analysis)
+                
+                # Save fusion results
+                await save_fusion_results_json(verification_id, fusion_results)
+                
                 saved = True
                 
                 # Update verification status
